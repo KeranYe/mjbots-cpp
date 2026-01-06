@@ -1,0 +1,6 @@
+[submodule "thirdparty/moteus"]
+	path = thirdparty/moteus
+	url = https://github.com/mjbots/moteus.git
+[submodule "thirdparty/pi3hat"]
+	path = thirdparty/pi3hat
+	url = https://github.com/mjbots/pi3hat.git
