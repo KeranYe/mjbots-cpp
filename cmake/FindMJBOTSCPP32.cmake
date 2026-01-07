@@ -1,0 +1,47 @@
+# This is content of FindMJBOTSCPP32.cmake
+# message(STATUS "MJBOTSCPP_SOURCE_DIR=" ${MJBOTSCPP_SOURCE_DIR})
+
+set(MJBOTSCPP_INCLUDE_DIRS "")
+set(MJBOTSCPP_LIBRARIES "")
+
+find_path(PI3HAT_INCLUDE_DIR
+          NAMES # all header files 
+          pi3hat.h 
+          PATHS # possible paths to search the header files
+          ${MJBOTSCPP_SOURCE_DIR}/include/pi3hat 
+          /usr/include/mjbotscpp/pi3hat 
+          /usr/local/include/mjbotscpp/pi3hat
+)
+
+find_path(MOTEUS_INCLUDE_DIR
+          NAMES # all header files 
+          moteus.h 
+          PATHS # possible paths to search the header files
+          ${MJBOTSCPP_SOURCE_DIR}/include/moteus 
+          /usr/include/mjbotscpp/moteus 
+          /usr/local/include/mjbotscpp/moteus
+)
+
+find_library(MJBOTSCPP_LIBRARY
+             NAMES mjbotscpp32 # lib object, like .a, .so
+             PATHS # possible paths to search the lib object
+             ${MJBOTSCPP_SOURCE_DIR}/lib 
+             /usr/lib
+             /usr/local/lib)
+
+if(PI3HAT_INCLUDE_DIR AND MOTEUS_INCLUDE_DIR AND MJBOTSCPP_LIBRARY)
+    set(MJBOTSCPP32_FOUND TRUE)
+endif(PI3HAT_INCLUDE_DIR AND MOTEUS_INCLUDE_DIR AND MJBOTSCPP_LIBRARY)
+
+list(APPEND MJBOTSCPP_INCLUDE_DIRS ${PI3HAT_INCLUDE_DIR} ${MOTEUS_INCLUDE_DIR})
+list(APPEND MJBOTSCPP_LIBRARIES ${MJBOTSCPP_LIBRARY})
+
+if(MJBOTSCPP32_FOUND)
+    if(NOT MJBOTSCPP32_FIND_QUIETLY)
+        message(STATUS "Found MJBOTSCPP: " ${MJBOTSCPP_LIBRARIES})
+    endif(NOT MJBOTSCPP32_FIND_QUIETLY)
+else(MJBOTSCPP32_FOUND)
+    if(MJBOTSCPP32_FIND_REQUIRED)
+        message(FATAL_ERROR "Could not find MJBOTSCPP library")
+    endif(MJBOTSCPP32_FIND_REQUIRED)
+endif(MJBOTSCPP32_FOUND)
