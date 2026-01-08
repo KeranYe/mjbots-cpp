@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.10)
 
 ############### Project Info ######################
-get_filename_component(PROJECT ${CMAKE_SOURCE_DIR} NAME)
+get_filename_component(PROJECT ${CMAKE_CURRENT_SOURCE_DIR} NAME)
 project(${PROJECT})
 message(STATUS "Build project: " ${PROJECT_NAME})
 message(STATUS "If cross-compiling: " ${CMAKE_CROSSCOMPILING})

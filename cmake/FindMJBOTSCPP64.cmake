@@ -1,33 +1,57 @@
 # This is content of FindMJBOTSCPP64.cmake
-# message(STATUS "MJBOTSCPP_SOURCE_DIR=" ${MJBOTSCPP_SOURCE_DIR})
+message(STATUS "MJBOTSCPP_ROOT_DIR=" ${MJBOTSCPP_ROOT_DIR})
 
 set(MJBOTSCPP_INCLUDE_DIRS "")
 set(MJBOTSCPP_LIBRARIES "")
 
 find_path(PI3HAT_INCLUDE_DIR
-          NAMES # all header files 
-          pi3hat.h 
-          PATHS # possible paths to search the header files
-          ${MJBOTSCPP_SOURCE_DIR}/include/pi3hat 
-          /usr/include/mjbotscpp/pi3hat 
-          /usr/local/include/mjbotscpp/pi3hat
+    NAMES # all header files 
+        pi3hat.h 
+    PATHS # possible paths to search the header files
+        ${MJBOTSCPP_ROOT_DIR}/include/pi3hat 
+        /usr/include/mjbotscpp/pi3hat 
+        /usr/local/include/mjbotscpp/pi3hat
+    NO_CMAKE_FIND_ROOT_PATH
 )
 
 find_path(MOTEUS_INCLUDE_DIR
-          NAMES # all header files 
-          moteus.h 
-          PATHS # possible paths to search the header files
-          ${MJBOTSCPP_SOURCE_DIR}/include/moteus 
-          /usr/include/mjbotscpp/moteus 
-          /usr/local/include/mjbotscpp/moteus
+    NAMES # all header files 
+        moteus.h 
+    PATHS # possible paths to search the header files
+        ${MJBOTSCPP_ROOT_DIR}/include/moteus 
+        /usr/include/mjbotscpp/moteus 
+        /usr/local/include/mjbotscpp/moteus
+    NO_CMAKE_FIND_ROOT_PATH
 )
 
 find_library(MJBOTSCPP_LIBRARY
-             NAMES mjbotscpp64 # lib object, like .a, .so
-             PATHS # possible paths to search the lib object
-             ${MJBOTSCPP_SOURCE_DIR}/lib 
-             /usr/lib
-             /usr/local/lib)
+    NAMES 
+        mjbotscpp64 # lib object, like .a, .so
+    PATHS # possible paths to search the lib object
+        ${MJBOTSCPP_ROOT_DIR}/lib 
+        /usr/lib
+        /usr/local/lib
+    NO_CMAKE_FIND_ROOT_PATH
+)
+
+# # debug
+# if(PI3HAT_INCLUDE_DIR)
+#     message(STATUS "PI3HAT_INCLUDE_DIR=" ${PI3HAT_INCLUDE_DIR})
+# else()
+#     message(STATUS "PI3HAT_INCLUDE_DIR not found")
+# endif()
+
+# if(MOTEUS_INCLUDE_DIR)
+#     message(STATUS "MOTEUS_INCLUDE_DIR=" ${MOTEUS_INCLUDE_DIR})
+# else()
+#     message(STATUS "MOTEUS_INCLUDE_DIR not found")
+# endif()
+
+# if(MJBOTSCPP_LIBRARY)
+#     message(STATUS "MJBOTSCPP_LIBRARY=" ${MJBOTSCPP_LIBRARY})
+# else()
+#     message(STATUS "MJBOTSCPP_LIBRARY not found")
+# endif()
 
 if(PI3HAT_INCLUDE_DIR AND MOTEUS_INCLUDE_DIR AND MJBOTSCPP_LIBRARY)
     set(MJBOTSCPP64_FOUND TRUE)
