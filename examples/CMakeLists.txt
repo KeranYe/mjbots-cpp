@@ -127,4 +127,24 @@ else() # 64 bits
         # BUILD_RPATH "$ORIGIN/../lib"
     )
 
+    # diagnostic_single_servo
+    add_executable( diagnostic_single_servo 
+        diagnostic_single_servo.cc
+    )
+    target_include_directories( diagnostic_single_servo PUBLIC 
+        ${MJBOTSCPP_INCLUDE_DIRS}
+        ${BCM_HOST_INCLUDE_DIR}
+    )
+    target_link_libraries( diagnostic_single_servo 
+        ${MJBOTSCPP_LIBRARIES}
+        ${BCM_HOST_LIBRARY} 
+    )
+    set_target_properties( diagnostic_single_servo 
+        PROPERTIES 
+        CLEAN_DIRECT_OUTPUT 1 
+        RUNTIME_OUTPUT_DIRECTORY "${BIN_OUTPUT_DIR}"
+        BUILD_RPATH "${LIB_OUTPUT_DIR}"
+        # BUILD_RPATH "$ORIGIN/../lib"
+    )
+
 endif()
