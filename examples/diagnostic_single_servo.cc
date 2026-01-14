@@ -11,6 +11,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <chrono>
 
 #include "moteus.h"
 #include "pi3hat_moteus_transport.h"
@@ -21,6 +22,8 @@ int main(int argc, char** argv) {
 
   const int servo_id = 3; 
   const int can_bus = 2;
+  const int loop_sleep_ms = 2000; // 2 seconds
+  const int loop_duration_s = 30; // run for 30 seconds
 
   // Pi3hat Transport
   Transport::Options pi3hat_options;
@@ -45,17 +48,34 @@ int main(int argc, char** argv) {
 
   std::string servo_status; 
 
-  // stop servo
-  moteus_controller->DiagnosticWrite("tel stop\n");
-  moteus_controller->DiagnosticFlush();
-  servo_status = moteus_controller->DiagnosticCommand("d stop", moteus::Controller::kExpectSingleLine);
-  moteus_controller->DiagnosticFlush();
-  if (servo_status != "OK") {
-    std::cerr << "Error stopping servo, returned output: " << servo_status << std::endl;
-    return 1;
-  }
+  // lambda: stop servo
+  auto stop_servo = [&]() -> int {
+    moteus_controller->DiagnosticWrite("tel stop\n");
+    moteus_controller->DiagnosticFlush();
+    auto status = moteus_controller->DiagnosticCommand("d stop", moteus::Controller::kExpectSingleLine);
+    moteus_controller->DiagnosticFlush();
+    if (status != "OK") {
+      std::cerr << "Error stopping servo, returned output: " << status << std::endl;
+      return 1;
+    }
+    return 0; 
+  };
 
-  { // servo info
+  // lambda: rezero servo
+  auto rezero_servo = [&]() -> int {
+    auto status = moteus_controller->DiagnosticCommand("d cfg-set-output 0", moteus::Controller::kExpectSingleLine);
+    moteus_controller->DiagnosticFlush();
+    if (status != "OK") {
+      std::cerr << "Error rezeroing servo, returned output: " << status  << std::endl;
+      return 1;
+    }
+    return 0; 
+  };
+
+  // lambda: servo info
+  auto servo_info = []( std::shared_ptr<mjbots::moteus::Controller> moteus_controller ) -> int 
+  {
+    // servo info
     const auto servo_id = std::stoi( 
       moteus_controller->DiagnosticCommand("conf get id.id", moteus::Controller::kExpectSingleLine)
     );
@@ -97,19 +117,9 @@ int main(int argc, char** argv) {
       << "PID: kp=" << servo_kp << ", ki=" << servo_ki << ", kd=" << servo_kd << "\n"
       << "Position Limits: min=" << servo_limit_posmin << ", max=" << servo_limit_posmax
       << std::endl; 
-  }
+    return 0;
+  }; 
 
-  // rezero servo
-  // moteus_controller->DiagnosticWrite("d cfg-set-output 0\n");
-  // moteus_controller->DiagnosticFlush();
-  servo_status = moteus_controller->DiagnosticCommand("d cfg-set-output 0", moteus::Controller::kExpectSingleLine);
-  moteus_controller->DiagnosticFlush();
-  if (servo_status != "OK") {
-    std::cerr << "Error rezeroing servo, returned output: " << servo_status  << std::endl;
-    return 1;
-  }
-  std::cout << "Rezeroed servo successfully.\n";
-  
   // const auto new_kp = 4.0;
 
   // std::ostringstream ostr;
@@ -120,59 +130,59 @@ int main(int argc, char** argv) {
 
   // std::cout << "Changed kp from " << old_kp << " to " << new_kp << "\n";
 
+  
+  // initialize servo
+  if (stop_servo() != 0) return 1; 
+
+  if (servo_info(moteus_controller) != 0) return 1;
+
+  if (rezero_servo() != 0) return 1;
+  std::cout << "Rezeroed servo successfully.\n";
+  
 
   // start servo
   moteus::PositionMode::Command pos_cmd;
   pos_cmd.position = std::numeric_limits<float>::quiet_NaN();
 
   std::vector<moteus::CanFdFrame> frames;
-  frames.push_back(moteus_controller->MakePosition(pos_cmd));
-
   std::vector<moteus::CanFdFrame> replies;
-  moteus::BlockingCallback cbk;
 
-  pi3hat_transport->Cycle(frames.data(), frames.size(),
-                   &replies, nullptr,
-                   nullptr, nullptr,
-                   cbk.callback());
-  cbk.Wait();
+  std::cout << "Starting diagnostic loop for " << loop_duration_s << " seconds...\n";
+  const auto start_time = std::chrono::steady_clock::now();
+  while (true) {
 
-  for (const auto& frame : replies) {
-    if (frame.source == servo_id) {  // Check if it's from servo ID
-      const auto result = moteus::Query::Parse(frame.data, frame.size);
-      ::printf("Servo %d  p/v/t=(%7.3f,%7.3f,%7.3f)\n",
-               frame.source, result.position, result.velocity, result.torque);
+    const auto elapsed = std::chrono::steady_clock::now() - start_time;
+    if (std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() >= loop_duration_s) {
+      break;
     }
+    frames.push_back(moteus_controller->MakePosition(pos_cmd));
+
+    moteus::BlockingCallback cbk;
+    pi3hat_transport->Cycle(frames.data(), frames.size(),
+                    &replies, nullptr,
+                    nullptr, nullptr,
+                    cbk.callback());
+    cbk.Wait();
+
+    for (const auto& frame : replies) {
+      if (frame.source == servo_id) {  // Check if it's from servo ID
+        const auto result = moteus::Query::Parse(frame.data, frame.size);
+        ::printf("Servo %d  p/v/t=(%7.3f,%7.3f,%7.3f)\n",
+                frame.source, result.position, result.velocity, result.torque);
+      }
+    }
+
+    // stop servo
+    if (stop_servo() != 0) return 1;
+
+    frames.clear();
+    replies.clear();
+    std::this_thread::sleep_for(std::chrono::milliseconds(loop_sleep_ms));
   }
 
-  // pi3hat::Attitude attitude;
-  // pi3hat_transport->Cycle(frames.data(), frames.size(),
-  //                  &replies, &attitude,
-  //                  nullptr, nullptr,
-  //                  cbk.callback());
-  // cbk.Wait();
+  std::cout << "Completed diagnostic loop.\n";
 
-  // const auto& a = attitude.attitude;
-  // ::printf("Attitude quaternion: (%4.2f,%4.2f,%4.2f,%4.2f)\n",
-  //          a.x, a.y, a.z, a.w);
-
-  // for (const auto& frame : replies) {
-  //   if (frame.source == servo_id) {  // Check if it's from servo ID
-  //     const auto result = moteus::Query::Parse(frame.data, frame.size);
-  //     ::printf("Servo %d  p/v/t=(%7.3f,%7.3f,%7.3f)\n",
-  //              frame.source, result.position, result.velocity, result.torque);
-  //   }
-  // }
-
-  // stop servo
-  moteus_controller->DiagnosticWrite("tel stop\n");
-  moteus_controller->DiagnosticFlush();
-  servo_status = moteus_controller->DiagnosticCommand("d stop", moteus::Controller::kExpectSingleLine);
-  moteus_controller->DiagnosticFlush();
-  if (servo_status != "OK") {
-    std::cerr << "Error stopping servo, returned output: " << servo_status << std::endl;
-    return 1;
-  }
+  if (stop_servo() != 0) return 1;
 
   return 0;
 }
