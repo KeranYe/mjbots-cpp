@@ -167,4 +167,24 @@ else() # 64 bits
         # BUILD_RPATH "$ORIGIN/../lib"
     )
 
+    # control_multiple_servos
+    add_executable( control_multiple_servos 
+        control_multiple_servos.cc
+    )
+    target_include_directories( control_multiple_servos PUBLIC 
+        ${MJBOTSCPP_INCLUDE_DIRS}
+        ${BCM_HOST_INCLUDE_DIR}
+    )
+    target_link_libraries( control_multiple_servos 
+        ${MJBOTSCPP_LIBRARIES}
+        ${BCM_HOST_LIBRARY} 
+    )
+    set_target_properties( control_multiple_servos 
+        PROPERTIES 
+        CLEAN_DIRECT_OUTPUT 1 
+        RUNTIME_OUTPUT_DIRECTORY "${BIN_OUTPUT_DIR}"
+        BUILD_RPATH "${LIB_OUTPUT_DIR}"
+        # BUILD_RPATH "$ORIGIN/../lib"
+    )
+
 endif()
