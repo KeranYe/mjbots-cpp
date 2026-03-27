@@ -18,190 +18,16 @@
 
 #include "moteus.h"
 #include "pi3hat_moteus_transport.h"
+#include "mjbotscpp.h"
 
 using namespace mjbots;
 using Transport = pi3hat::Pi3HatMoteusTransport;
 
-struct ServoConfig {
-  double kp = 400.0;
-  double ki = 1.0;
-  double kd = 2.0;
-  double position_min = -3.0; // rot
-  double position_max = 3.0; // rot
-};
-
-struct ServoInfo {
-  int id; // servo id
-  int can; // can bus
-  ServoConfig config;
-};
 
 struct ServoPositionFeedback {
   moteus::Mode mode;  
   moteus::PositionMode::Command position_feedback;
 };
-
-// Converted lambda functions to normal functions
-int clear_servo_error(std::shared_ptr<mjbots::moteus::Controller> moteus_controller) {
-  moteus_controller->DiagnosticWrite("tel stop\n");
-  moteus_controller->DiagnosticFlush();
-  return 0;
-}
-
-int stop_servo(std::shared_ptr<mjbots::moteus::Controller> moteus_controller) {
-  moteus_controller->DiagnosticWrite("tel stop\n");
-  moteus_controller->DiagnosticFlush();
-  auto status = moteus_controller->DiagnosticCommand("d stop", moteus::Controller::kExpectSingleLine);
-  moteus_controller->DiagnosticFlush();
-  if (status != "OK") {
-    std::cerr << "Error stopping servo, returned output: " << status << std::endl;
-    return 1;
-  }
-  return 0;
-}
-
-int stop_servos(std::vector<std::shared_ptr<mjbots::moteus::Controller>> &moteus_controllers) {
-  for (auto& controller : moteus_controllers) {
-    if (stop_servo(controller) != 0) {
-      return 1;
-    }
-  }
-  return 0;
-}
-
-int rezero_servo(std::shared_ptr<mjbots::moteus::Controller> moteus_controller) {
-  auto status = moteus_controller->DiagnosticCommand("d cfg-set-output 0", moteus::Controller::kExpectSingleLine);
-  moteus_controller->DiagnosticFlush();
-  if (status != "OK") {
-    std::cerr << "Error rezeroing servo, returned output: " << status  << std::endl;
-    return 1;
-  }
-  return 0;
-}
-
-int rezero_servos(std::vector<std::shared_ptr<mjbots::moteus::Controller>> &moteus_controllers) {
-  for (auto& controller : moteus_controllers) {
-    if (rezero_servo(controller) != 0) {
-      return 1;
-    }
-  }
-  return 0;
-}
-
-int servo_info(std::shared_ptr<mjbots::moteus::Controller> moteus_controller) {
-  const auto servo_id = std::stoi(
-      moteus_controller->DiagnosticCommand("conf get id.id", moteus::Controller::kExpectSingleLine)
-  );
-  moteus_controller->DiagnosticFlush();
-
-  const auto servo_gear_ratio = std::stod(
-      moteus_controller->DiagnosticCommand("conf get motor_position.rotor_to_output_ratio", moteus::Controller::kExpectSingleLine)
-  );
-  moteus_controller->DiagnosticFlush();
-
-  const auto servo_kp = std::stod(
-      moteus_controller->DiagnosticCommand("conf get servo.pid_position.kp", moteus::Controller::kExpectSingleLine)
-  );
-  moteus_controller->DiagnosticFlush();
-
-  const auto servo_ki = std::stod(
-      moteus_controller->DiagnosticCommand("conf get servo.pid_position.ki", moteus::Controller::kExpectSingleLine)
-  );
-  moteus_controller->DiagnosticFlush();
-
-  const auto servo_kd = std::stod(
-      moteus_controller->DiagnosticCommand("conf get servo.pid_position.kd", moteus::Controller::kExpectSingleLine)
-  );
-  moteus_controller->DiagnosticFlush();
-
-  const auto servo_limit_posmax = std::stod(
-      moteus_controller->DiagnosticCommand("conf get servopos.position_max", moteus::Controller::kExpectSingleLine)
-  );
-  moteus_controller->DiagnosticFlush();
-
-  const auto servo_limit_posmin = std::stod(
-      moteus_controller->DiagnosticCommand("conf get servopos.position_min", moteus::Controller::kExpectSingleLine)
-  );
-  moteus_controller->DiagnosticFlush();
-
-  std::cout
-    << "Servo ID: " << servo_id << "\n"
-    << "Gear Ratio: " << servo_gear_ratio << "\n"
-    << "PID: kp=" << servo_kp << ", ki=" << servo_ki << ", kd=" << servo_kd << "\n"
-    << "Position Limits: min=" << servo_limit_posmin << ", max=" << servo_limit_posmax
-    << std::endl;
-  return 0;
-}
-
-int servos_info(std::vector<std::shared_ptr<mjbots::moteus::Controller>> &moteus_controllers) {
-  for (auto& controller : moteus_controllers) {
-    if (servo_info(controller) != 0) {
-      return 1;
-    }
-  }
-  return 0;
-}
-
-int servo_conf_set(const ServoConfig& new_config, std::shared_ptr<mjbots::moteus::Controller> moteus_controller) {
-  std::ostringstream ostr;
-  std::string response;
-
-  ostr << "conf set servo.pid_position.kp " << new_config.kp;
-  response = moteus_controller->DiagnosticCommand(ostr.str(), moteus::Controller::kExpectSingleLine);
-  moteus_controller->DiagnosticFlush();
-  ostr.str("");
-  if (response != "OK") {
-    std::cerr << "Error setting kp, response: " << response << std::endl;
-    return 1;
-  }
-
-  ostr << "conf set servo.pid_position.ki " << new_config.ki;
-  response = moteus_controller->DiagnosticCommand(ostr.str(), moteus::Controller::kExpectSingleLine);
-  moteus_controller->DiagnosticFlush();
-  ostr.str("");
-  if (response != "OK") {
-    std::cerr << "Error setting ki, response: " << response << std::endl;
-    return 1;
-  }
-
-  ostr << "conf set servo.pid_position.kd " << new_config.kd;
-  response = moteus_controller->DiagnosticCommand(ostr.str(), moteus::Controller::kExpectSingleLine);
-  moteus_controller->DiagnosticFlush();
-  ostr.str("");
-  if (response != "OK") {
-    std::cerr << "Error setting kd, response: " << response << std::endl;
-    return 1;
-  }
-
-  ostr << "conf set servopos.position_min " << new_config.position_min;
-  response = moteus_controller->DiagnosticCommand(ostr.str(), moteus::Controller::kExpectSingleLine);
-  moteus_controller->DiagnosticFlush();
-  ostr.str("");
-  if (response != "OK") {
-    std::cerr << "Error setting position_min, response: " << response << std::endl;
-    return 1;
-  }
-
-  ostr << "conf set servopos.position_max " << new_config.position_max;
-  response = moteus_controller->DiagnosticCommand(ostr.str(), moteus::Controller::kExpectSingleLine);
-  moteus_controller->DiagnosticFlush();
-  ostr.str("");
-  if (response != "OK") {
-    std::cerr << "Error setting position_max, response: " << response << std::endl;
-    return 1;
-  }
-
-  return 0;
-}
-
-int servos_conf_set(const ServoConfig& new_config, std::vector<std::shared_ptr<mjbots::moteus::Controller>> &moteus_controllers) {
-  for (auto& controller : moteus_controllers) {
-    if (servo_conf_set(new_config, controller) != 0) {
-      return 1;
-    }
-  }
-  return 0;
-}
 
 void reset_servo_cmd(moteus::PositionMode::Command& pos_cmd) {
   pos_cmd.position = std::numeric_limits<float>::quiet_NaN();
@@ -232,16 +58,28 @@ int main(int argc, char** argv) {
     {3, 2}, 
   };
 
-  const int loop_move_ms = 5; // 0.005 seconds, 200 Hz
-  const int loop_print_ms = 1000; // 1 second
-  const int loop_duration_s = 30; // run for 10 seconds
+  const int loop_move_ms = 2; // 0.002 seconds, 500 Hz
+  const int loop_print_ms = 500; // 0.5 second
+  const int loop_duration_s = 30; // run for 30 seconds
 
   const double position_increment = 0.001; // increment position by 0.01 rot each loop
   const double velocity_limit = 0.5; // max velocity limit, rot/s 
 
   double pos_initial = 0.0; // initial position, rot
 
-  ServoConfig new_config;
+  mjbotscpp::ServoConfig new_config;
+  {
+    new_config.kp = 400.0;
+    new_config.ki = 1.0;
+    new_config.kd = 2.0;
+    new_config.position_min = -3.0; // rot
+    new_config.position_max = 3.0; // rot
+
+    new_config.override_direction = true; // whether to override the default direction from the servo config
+    new_config.direction = 1; // default to 1, set to -1 for reversed
+    new_config.override_reduction_ratio = true; // whether to override the default reduction ratio from the servo config
+    new_config.reduction_ratio = 1.0/6.0; // default to 6:1 reduction, which is used in qdd100 servos
+  }
 
   // Pi3hat Transport
   Transport::Options pi3hat_options;
@@ -257,9 +95,10 @@ int main(int argc, char** argv) {
 
   // pi3hat::Attitude attitude;
 
-  // Moteus Controllers
+  // Moteus controllers with configurations for each servo
   std::vector<moteus::Controller::Options> moteus_options_list;
   std::vector<std::shared_ptr<mjbots::moteus::Controller>> moteus_controller_list;
+  std::vector<mjbotscpp::ServoConfigWithID> servo_config_with_id_list;
   for (const auto& [servo_id, can_bus] : servo_map) {
     moteus::Controller::Options moteus_options;
     moteus_options.transport = pi3hat_transport;
@@ -268,24 +107,31 @@ int main(int argc, char** argv) {
     auto moteus_controller = std::make_shared<mjbots::moteus::Controller>(moteus_options);
     moteus_controller_list.push_back(moteus_controller);
     moteus_options_list.push_back(moteus_options);
+
+    mjbotscpp::ServoConfigWithID servo_config_with_id;
+    servo_config_with_id.id = servo_id;
+    servo_config_with_id.can = can_bus;
+    servo_config_with_id.config = new_config;
+    servo_config_with_id_list.push_back(servo_config_with_id);
   }
   
   // initialize servo
   std::cout << "Stopping servos..." << std::endl;
-  if (stop_servos(moteus_controller_list) != 0) return 1;
+  if (mjbotscpp::StopServos(moteus_controller_list) != 0) return 1;
   std::cout << "Stopped servos successfully." << std::endl; 
   // if (clear_servo_error() != 0) return 1;
 
   std::cout << "Setting servo configurations..." << std::endl;
-  if (servos_conf_set( new_config, moteus_controller_list ) != 0) return 1;
+  // if (mjbotscpp::ServosConfSet( new_config, moteus_controller_list ) != 0) return 1;
+  if (mjbotscpp::ServosConfSet( servo_config_with_id_list, moteus_controller_list ) != 0) return 1;
   std::cout << "Set servo configurations successfully." << std::endl;
 
   std::cout << "Fetching servo information..." << std::endl;
-  if (servos_info(moteus_controller_list) != 0) return 1;
+  std::cout << mjbotscpp::ServosInfo(moteus_controller_list) << std::endl;
   std::cout << "Fetched servo information successfully." << std::endl;
 
   std::cout << "Rezeroing servos..." << std::endl;
-  if (rezero_servos(moteus_controller_list) != 0) return 1;
+  if (mjbotscpp::RezeroServos(moteus_controller_list) != 0) return 1;
   std::cout << "Rezeroed servos successfully." << std::endl;
   
 
@@ -326,7 +172,6 @@ int main(int argc, char** argv) {
         if (std::chrono::duration_cast<std::chrono::seconds>(elapsed_time).count() >= loop_duration_s) {
           break;
         }
-
       }
 
       // if (std::chrono::duration_cast<std::chrono::seconds>(elapsed_time).count() >= loop_duration_s) {
@@ -441,7 +286,7 @@ int main(int argc, char** argv) {
   print_thread.join();
   move_thread.join();
 
-  if (stop_servos(moteus_controller_list) != 0) return 1;
+  if (mjbotscpp::StopServos(moteus_controller_list) != 0) return 1;
 
   return 0;
 }

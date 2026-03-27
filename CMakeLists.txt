@@ -70,6 +70,12 @@ file(COPY ${PI3HAT_EXAMPLES_RAW} DESTINATION "${MJBOTS_EXAMPLE_DIR}/pi3hat")
 file(GLOB_RECURSE PI3HAT_HEADERS "${MJBOTS_HEADER_DIR}/pi3hat/*.h")
 file(GLOB_RECURSE PI3HAT_SOURCES "${MJBOTS_SOURCE_DIR}/pi3hat/*.cc")
 
+############### MJBOTS-CPP ######################
+file(GLOB_RECURSE MJBOTSCPP_HEADERS "${MJBOTS_HEADER_DIR}/mjbotscpp/*.h")
+file(GLOB_RECURSE MJBOTSCPP_SOURCES "${MJBOTS_SOURCE_DIR}/mjbotscpp/*.cc")
+# set(MJBOTSCPP_HEADERS "${CMAKE_CURRENT_SOURCE_DIR}/..")
+
+
 # ############### Header & Source ######################
 # # automatic copy
 # # MOTEUS
@@ -100,10 +106,13 @@ if ( ARCH_BITS EQUAL 32 ) # 32 bits
         ${PI3HAT_SOURCES}
         ${MOTEUS_HEADERS} 
         ${MOTEUS_SOURCES} 
+        ${MJBOTSCPP_HEADERS}
+        ${MJBOTSCPP_SOURCES}
     )
     target_include_directories( mjbotscpp32 PUBLIC 
         ${MJBOTS_HEADER_DIR}/pi3hat
         ${MJBOTS_HEADER_DIR}/moteus 
+        ${MJBOTS_HEADER_DIR}/mjbotscpp
         ${BCM_HOST_INCLUDE_DIR} 
     )
     target_link_libraries( mjbotscpp32 
@@ -121,10 +130,13 @@ if ( ARCH_BITS EQUAL 32 ) # 32 bits
         ${PI3HAT_SOURCES}
         ${MOTEUS_HEADERS} 
         ${MOTEUS_SOURCES} 
+        ${MJBOTSCPP_HEADERS}
+        ${MJBOTSCPP_SOURCES}
     )
     target_include_directories( mjbotscpp32_static PUBLIC 
         ${MJBOTS_HEADER_DIR}/pi3hat 
         ${MJBOTS_HEADER_DIR}/moteus 
+        ${MJBOTS_HEADER_DIR}/mjbotscpp
         ${BCM_HOST_INCLUDE_DIR} 
     )
     target_link_libraries( mjbotscpp32_static 
@@ -145,10 +157,13 @@ else() # 64 bits
         ${PI3HAT_SOURCES} 
         ${MOTEUS_HEADERS} 
         ${MOTEUS_SOURCES}
+        ${MJBOTSCPP_HEADERS}
+        ${MJBOTSCPP_SOURCES}
     )
     target_include_directories( mjbotscpp64 PUBLIC 
         ${MJBOTS_HEADER_DIR}/pi3hat
         ${MJBOTS_HEADER_DIR}/moteus 
+        ${MJBOTS_HEADER_DIR}/mjbotscpp
         ${BCM_HOST_INCLUDE_DIR} 
     )
     target_link_libraries( mjbotscpp64 
@@ -166,10 +181,13 @@ else() # 64 bits
         ${PI3HAT_SOURCES} 
         ${MOTEUS_HEADERS} 
         ${MOTEUS_SOURCES}
+        ${MJBOTSCPP_HEADERS}
+        ${MJBOTSCPP_SOURCES}
     )
     target_include_directories( mjbotscpp64_static PUBLIC 
         ${MJBOTS_HEADER_DIR}/pi3hat 
         ${MJBOTS_HEADER_DIR}/moteus 
+        ${MJBOTS_HEADER_DIR}/mjbotscpp
         ${BCM_HOST_INCLUDE_DIR} 
     )
     target_link_libraries( mjbotscpp64_static 

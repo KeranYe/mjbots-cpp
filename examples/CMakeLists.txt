@@ -128,18 +128,18 @@ else() # 64 bits
     )
 
     # diagnostic_single_servo
-    add_executable( diagnostic_single_servo 
+    add_executable( diagnostic_single_servo_64 
         diagnostic_single_servo.cc
     )
-    target_include_directories( diagnostic_single_servo PUBLIC 
+    target_include_directories( diagnostic_single_servo_64 PUBLIC 
         ${MJBOTSCPP_INCLUDE_DIRS}
         ${BCM_HOST_INCLUDE_DIR}
     )
-    target_link_libraries( diagnostic_single_servo 
+    target_link_libraries( diagnostic_single_servo_64 
         ${MJBOTSCPP_LIBRARIES}
         ${BCM_HOST_LIBRARY} 
     )
-    set_target_properties( diagnostic_single_servo 
+    set_target_properties( diagnostic_single_servo_64 
         PROPERTIES 
         CLEAN_DIRECT_OUTPUT 1 
         RUNTIME_OUTPUT_DIRECTORY "${BIN_OUTPUT_DIR}"
@@ -148,18 +148,18 @@ else() # 64 bits
     )
 
     # control_single_servo
-    add_executable( control_single_servo 
+    add_executable( control_single_servo_64 
         control_single_servo.cc
     )
-    target_include_directories( control_single_servo PUBLIC 
+    target_include_directories( control_single_servo_64 PUBLIC 
         ${MJBOTSCPP_INCLUDE_DIRS}
         ${BCM_HOST_INCLUDE_DIR}
     )
-    target_link_libraries( control_single_servo 
+    target_link_libraries( control_single_servo_64 
         ${MJBOTSCPP_LIBRARIES}
         ${BCM_HOST_LIBRARY} 
     )
-    set_target_properties( control_single_servo 
+    set_target_properties( control_single_servo_64 
         PROPERTIES 
         CLEAN_DIRECT_OUTPUT 1 
         RUNTIME_OUTPUT_DIRECTORY "${BIN_OUTPUT_DIR}"
@@ -168,18 +168,18 @@ else() # 64 bits
     )
 
     # control_multiple_servos
-    add_executable( control_multiple_servos 
+    add_executable( control_multiple_servos_64 
         control_multiple_servos.cc
     )
-    target_include_directories( control_multiple_servos PUBLIC 
+    target_include_directories( control_multiple_servos_64 PUBLIC 
         ${MJBOTSCPP_INCLUDE_DIRS}
         ${BCM_HOST_INCLUDE_DIR}
     )
-    target_link_libraries( control_multiple_servos 
+    target_link_libraries( control_multiple_servos_64 
         ${MJBOTSCPP_LIBRARIES}
         ${BCM_HOST_LIBRARY} 
     )
-    set_target_properties( control_multiple_servos 
+    set_target_properties( control_multiple_servos_64 
         PROPERTIES 
         CLEAN_DIRECT_OUTPUT 1 
         RUNTIME_OUTPUT_DIRECTORY "${BIN_OUTPUT_DIR}"
