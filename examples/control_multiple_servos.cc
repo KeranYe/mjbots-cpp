@@ -15,6 +15,7 @@
 #include <thread>
 #include <mutex>
 #include <iomanip>
+#include <future>
 
 #include "moteus.h"
 #include "pi3hat_moteus_transport.h"
@@ -59,8 +60,11 @@ int main(int argc, char** argv) {
   };
 
   const int loop_move_ms = 2; // 0.002 seconds, 500 Hz
+  const int loop_idle_ms = 2; // 0.002 seconds, 500 Hz
   const int loop_print_ms = 500; // 0.5 second
-  const int loop_duration_s = 30; // run for 30 seconds
+  const int loop_move_duration_s = 30; // move for 30 seconds
+  const int loop_idle_duration_s = 30; // idle for 30 seconds
+  const int loop_total_duration_s = loop_move_duration_s + loop_idle_duration_s; // total duration for the program
 
   const double position_increment = 0.001; // increment position by 0.01 rot each loop
   const double velocity_limit = 0.5; // max velocity limit, rot/s 
@@ -156,11 +160,26 @@ int main(int argc, char** argv) {
 
   std::mutex data_mutex;
   
-  const auto start_time = std::chrono::steady_clock::now();
-  std::chrono::nanoseconds elapsed_time = std::chrono::nanoseconds::zero(); 
+  const auto start_time = std::chrono::steady_clock::now(); // overall start time for the program
+  std::chrono::nanoseconds elapsed_time = std::chrono::nanoseconds::zero(); // overall elapsed time for the program
 
-  std::thread move_thread([&]() {
-    std::cout << "Starting moving loop for " << loop_duration_s << " seconds...\n";
+  
+  /**********************/
+  /** Lambda Functions **/
+  /**********************/
+
+  std::promise<void> move_thread_promise_completed;
+  std::future<void> move_thread_future_completed = move_thread_promise_completed.get_future();
+
+  std::promise<void> idle_thread_promise_completed;
+  std::future<void> idle_thread_future_completed = idle_thread_promise_completed.get_future();
+
+  auto move_thread_func = [&]() {
+    std::cout << "Starting moving loop for " << loop_move_duration_s << " seconds...\n";
+    
+    const auto thread_start_time = std::chrono::steady_clock::now();
+    std::chrono::nanoseconds thread_elapsed_time = std::chrono::nanoseconds::zero();
+
     while (true) {
 
       frames.clear();
@@ -168,8 +187,9 @@ int main(int argc, char** argv) {
       
       {
         std::lock_guard<std::mutex> lock(data_mutex);
+        thread_elapsed_time = std::chrono::steady_clock::now() - thread_start_time;
         elapsed_time = std::chrono::steady_clock::now() - start_time;
-        if (std::chrono::duration_cast<std::chrono::seconds>(elapsed_time).count() >= loop_duration_s) {
+        if (std::chrono::duration_cast<std::chrono::seconds>(thread_elapsed_time).count() >= loop_move_duration_s) {
           break;
         }
       }
@@ -238,10 +258,95 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "Completed moving loop.\n";
-  });
+    move_thread_promise_completed.set_value(); // signal that move thread is completed
 
+    return;
+  }; 
 
-  std::thread print_thread([&]() {
+  auto idle_thread_func = [&]() {
+    // wait until move thread is completed before starting idle loop
+    move_thread_future_completed.wait();
+
+    std::cout << "Starting idle loop for " << loop_idle_duration_s << " seconds...\n";
+
+    const auto thread_start_time = std::chrono::steady_clock::now();
+    std::chrono::nanoseconds thread_elapsed_time = std::chrono::nanoseconds::zero();
+
+    while (true) {
+
+      frames.clear();
+      replies.clear();
+      
+      {
+        std::lock_guard<std::mutex> lock(data_mutex);
+        thread_elapsed_time = std::chrono::steady_clock::now() - thread_start_time;
+        elapsed_time = std::chrono::steady_clock::now() - start_time;
+        if (std::chrono::duration_cast<std::chrono::seconds>(thread_elapsed_time).count() >= loop_idle_duration_s) {
+          break;
+        }
+      }
+
+      // if (std::chrono::duration_cast<std::chrono::seconds>(elapsed_time).count() >= loop_duration_s) {
+      //   break;
+      // }
+
+      // Update command under lock since print thread reads `pos_cmd`.
+      for (const auto& [servo_id, can_bus] : servo_map) {
+        std::lock_guard<std::mutex> lock(data_mutex);
+
+        // quiet_NaN command: maintain current position
+        moteus::PositionMode::Command& pos_cmd = pos_cmd_list[servo_id];
+        ServoPositionFeedback& servo_feedback = servo_feedback_list[servo_id];
+        pos_cmd.position = std::numeric_limits<double>::quiet_NaN(); // move to initial position if no feedback
+        pos_cmd.velocity = std::numeric_limits<double>::quiet_NaN();
+        pos_cmd.feedforward_torque = std::numeric_limits<double>::quiet_NaN();
+      }
+
+      // frames.push_back(moteus_controller->MakePosition(pos_cmd));
+      for (auto& moteus_controller : moteus_controller_list) {
+        const int servo_id = moteus_controller->options().id;
+        const moteus::PositionMode::Command& pos_cmd = pos_cmd_list[servo_id];
+
+        // frames.push_back(moteus_controller->MakePosition(pos_cmd)); // send quiet_NaN command to maintain current position
+
+        // frames.push_back(moteus_controller->MakeQuery()); // send query command to get feedback while idling, current on, with some friction
+
+        frames.push_back(moteus_controller->MakeStop()); // send stop command to get feedback while idling, current off, no friction
+      }
+
+      moteus::BlockingCallback cbk;
+      pi3hat_transport->Cycle(frames.data(), frames.size(),
+                      &replies, nullptr,
+                      nullptr, nullptr,
+                      cbk.callback());
+      cbk.Wait();
+
+      // parse feedback
+      for ( const auto& frame : replies ) {
+        const int servo_id = frame.source;
+        if ( servo_map.find(servo_id) == servo_map.end() ) {
+          continue; // skip if not in servo_map
+        }
+        ServoPositionFeedback& servo_feedback = servo_feedback_list[servo_id];
+        const auto result = moteus::Query::Parse(frame.data, frame.size);
+
+        std::lock_guard<std::mutex> lock(data_mutex);
+        servo_feedback.mode = result.mode;
+        servo_feedback.position_feedback.position = result.position;
+        servo_feedback.position_feedback.velocity = result.velocity;
+        servo_feedback.position_feedback.feedforward_torque = result.torque;
+      }
+
+      std::this_thread::sleep_for(std::chrono::milliseconds(loop_idle_ms));
+    }
+
+    std::cout << "Completed idle loop.\n";
+    idle_thread_promise_completed.set_value(); // signal that idle thread is completed
+
+    return;
+  }; 
+
+  auto print_thread_func = [&]() {
     while (true) {
 
       // Copy shared data under lock to minimize hold time.
@@ -255,7 +360,14 @@ int main(int argc, char** argv) {
         local_feedback_list = servo_feedback_list;
       }
 
-      if (local_elapsed_time.count() >= loop_duration_s * 1e9) {
+      // // timer-based loop exit condition
+      // if (local_elapsed_time.count() >= loop_total_duration_s * 1e9) {
+      //   break;
+      // }
+
+      // future-based loop exit condition
+      if (move_thread_future_completed.wait_for(std::chrono::seconds(0)) == std::future_status::ready &&
+          idle_thread_future_completed.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
         break;
       }
 
@@ -281,10 +393,25 @@ int main(int argc, char** argv) {
 
       std::this_thread::sleep_for(std::chrono::milliseconds(loop_print_ms));
     }
-  });
 
-  print_thread.join();
+    std::cout << "Completed printing loop.\n";
+
+    return; 
+  }; 
+
+  /**********************/
+  /** Threads **/
+  /**********************/
+  std::thread move_thread, idle_thread, print_thread;
+
+  print_thread = std::thread( print_thread_func );
+  move_thread = std::thread( move_thread_func );
+  idle_thread = std::thread( idle_thread_func );
+
   move_thread.join();
+  idle_thread.join();
+  print_thread.join();
+
 
   if (mjbotscpp::StopServos(moteus_controller_list) != 0) return 1;
 
