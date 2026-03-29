@@ -168,16 +168,19 @@ else() # 64 bits
     )
 
     # control_multiple_servos
+    find_package(yaml-cpp REQUIRED)
     add_executable( control_multiple_servos_64 
         control_multiple_servos.cc
     )
     target_include_directories( control_multiple_servos_64 PUBLIC 
         ${MJBOTSCPP_INCLUDE_DIRS}
         ${BCM_HOST_INCLUDE_DIR}
+        ${YAML_CPP_INCLUDE_DIR}
     )
     target_link_libraries( control_multiple_servos_64 
         ${MJBOTSCPP_LIBRARIES}
-        ${BCM_HOST_LIBRARY} 
+        ${BCM_HOST_LIBRARY}
+        yaml-cpp
     )
     set_target_properties( control_multiple_servos_64 
         PROPERTIES 

@@ -1,4 +1,4 @@
-// Diagnostic Protocol Test for Single Moteus Servo with Pi3hat Transport
+// Diagnostic and Control Protocol Test for Multiple Moteus Servos with Pi3hat Transport
 // Author: Keran Ye
 // Date: Jan 2026
 
@@ -16,6 +16,8 @@
 #include <mutex>
 #include <iomanip>
 #include <future>
+
+#include <yaml-cpp/yaml.h>
 
 #include "moteus.h"
 #include "pi3hat_moteus_transport.h"
@@ -52,24 +54,93 @@ double servo_sinusoid_trajectory_next(double time_s, double pos_initial = 0.0, d
 int main(int argc, char** argv) {
   
   // Configuration
-  
-  const std::map<int,int> servo_map = // servo id - can bus map 
+  const std::string config_path = (argc > 1) ? argv[1] : "conf.yaml";
+
+  // Parse servo map from YAML: can_servo_map: {can_bus: [servo_ids]}
+  // Convert to {servo_id: can_bus}
+  std::map<int, int> servo_map;
   {
-    {1, 2}, 
-    {3, 2}, 
-  };
+    YAML::Node config = YAML::LoadFile(config_path);
+    if (config.Type() == YAML::NodeType::Null || config.Type() == YAML::NodeType::Undefined) {
+      std::cerr << "Error: failed to load config file " << config_path << std::endl;
+      return 1;
+    }
 
-  const int loop_move_ms = 2; // 0.002 seconds, 500 Hz
-  const int loop_idle_ms = 2; // 0.002 seconds, 500 Hz
-  const int loop_print_ms = 500; // 0.5 second
-  const int loop_move_duration_s = 30; // move for 30 seconds
-  const int loop_idle_duration_s = 30; // idle for 30 seconds
-  const int loop_total_duration_s = loop_move_duration_s + loop_idle_duration_s; // total duration for the program
+    const YAML::Node& can_servo_map = config["can_servo_map"];
+    if (can_servo_map.Type() == YAML::NodeType::Null) {
+      std::cerr << "Error: can_servo_map not found in config file " << config_path << std::endl;
+      return 1;
+    }
+    if (can_servo_map.Type() != YAML::NodeType::Map) {
+      std::cerr << "Error: can_servo_map in config file " << config_path << " is not a map" << std::endl;
+      return 1;
+    }
 
-  const double position_increment = 0.001; // increment position by 0.01 rot each loop
-  const double velocity_limit = 0.5; // max velocity limit, rot/s 
 
-  double pos_initial = 0.0; // initial position, rot
+    for (const auto& entry : can_servo_map) {
+      int can_bus = entry.first.as<int>();
+      for (const auto& srv : entry.second) {
+        servo_map[srv.as<int>()] = can_bus;
+      }
+    }
+  }
+
+  if (servo_map.empty()) {
+    std::cerr << "Error: no servos found in " << config_path << std::endl;
+    return 1;
+  } else {
+    std::cout << "Found the following servos in " << config_path << ":" << std::endl;
+    for (const auto& [servo_id, can_bus] : servo_map) {
+      std::cout << "  Servo ID: " << servo_id << " on CAN bus: " << can_bus << std::endl;
+    }
+  }
+
+  // timing parameters
+  int loop_move_ms = 2;
+  int loop_idle_ms = 2;
+  int loop_print_ms = 500;
+  int loop_move_duration_s = 30;
+  int loop_idle_duration_s = 30;
+  {
+    YAML::Node config = YAML::LoadFile(config_path);
+    const YAML::Node& timing = config["timing_parameters"];
+    if (timing && timing.IsMap()) {
+      if (timing["loop_move_ms"])      loop_move_ms      = timing["loop_move_ms"].as<int>();
+      if (timing["loop_idle_ms"])      loop_idle_ms      = timing["loop_idle_ms"].as<int>();
+      if (timing["loop_print_ms"])     loop_print_ms     = timing["loop_print_ms"].as<int>();
+      if (timing["loop_move_duration_s"]) loop_move_duration_s = timing["loop_move_duration_s"].as<int>();
+      if (timing["loop_idle_duration_s"]) loop_idle_duration_s = timing["loop_idle_duration_s"].as<int>();
+
+      std::cout << "Timing parameters from config:" << std::endl;
+      std::cout << "  loop_move_ms: " << loop_move_ms << std::endl;
+      std::cout << "  loop_idle_ms: " << loop_idle_ms << std::endl;
+      std::cout << "  loop_print_ms: " << loop_print_ms << std::endl;
+      std::cout << "  loop_move_duration_s: " << loop_move_duration_s << std::endl;
+      std::cout << "  loop_idle_duration_s: " << loop_idle_duration_s << std::endl;
+
+    }
+  }
+  const int loop_total_duration_s = loop_move_duration_s + loop_idle_duration_s;
+  std::cout << "Total loop duration (move + idle) from config: " << loop_total_duration_s << " s" << std::endl;
+
+  // trajectory parameters
+  double position_increment = 0.001;
+  double velocity_limit = 0.5;
+  double pos_initial = 0.0;
+  {
+    YAML::Node config = YAML::LoadFile(config_path);
+    const YAML::Node& traj = config["trajectory_parameters"];
+    if (traj && traj.IsMap()) {
+      if (traj["position_increment"]) position_increment = traj["position_increment"].as<double>();
+      if (traj["velocity_limit"])     velocity_limit     = traj["velocity_limit"].as<double>();
+      if (traj["pos_initial"])        pos_initial        = traj["pos_initial"].as<double>();
+      
+      std::cout << "Trajectory parameters from config:" << std::endl;
+      std::cout << "  position_increment: " << position_increment << std::endl;
+      std::cout << "  velocity_limit: " << velocity_limit << std::endl;
+      std::cout << "  pos_initial: " << pos_initial << std::endl;
+    }
+  }
 
   mjbotscpp::ServoConfig new_config;
   {
@@ -159,6 +230,14 @@ int main(int argc, char** argv) {
   }
 
   std::mutex data_mutex;
+
+
+  // only start when pressed key r
+  std::cout << "Press 'r' to start the servo control loop..." << std::endl;
+  char c;
+  do {
+    std::cin >> c;
+  } while (c != 'r'); 
   
   const auto start_time = std::chrono::steady_clock::now(); // overall start time for the program
   std::chrono::nanoseconds elapsed_time = std::chrono::nanoseconds::zero(); // overall elapsed time for the program
