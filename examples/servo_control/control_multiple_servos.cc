@@ -426,10 +426,11 @@ int main(int argc, char** argv) {
   }; 
 
   auto print_thread_func = [&]() {
+    size_t num_servos = servo_map.size();
+    bool first_print = true;
     while (true) {
-
       // Copy shared data under lock to minimize hold time.
-      std::chrono::nanoseconds local_elapsed_time; 
+      std::chrono::nanoseconds local_elapsed_time;
       std::map<int, moteus::PositionMode::Command> local_cmd_list;
       std::map<int, ServoPositionFeedback> local_feedback_list;
       {
@@ -439,11 +440,6 @@ int main(int argc, char** argv) {
         local_feedback_list = servo_feedback_list;
       }
 
-      // // timer-based loop exit condition
-      // if (local_elapsed_time.count() >= loop_total_duration_s * 1e9) {
-      //   break;
-      // }
-
       // future-based loop exit condition
       if (move_thread_future_completed.wait_for(std::chrono::seconds(0)) == std::future_status::ready &&
           idle_thread_future_completed.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
@@ -452,10 +448,20 @@ int main(int argc, char** argv) {
 
       double elapsed_ms = local_elapsed_time.count() / 1e6;
 
+      // Move cursor up to overwrite previous output (except first print)
+      if (!first_print) {
+        // Move cursor up by num_servos lines
+        std::cout << "\033[" << num_servos << "A";
+      } else {
+        first_print = false;
+      }
+
       for (const auto& [servo_id, can_bus] : servo_map) {
         const moteus::PositionMode::Command& local_cmd = local_cmd_list[servo_id];
         const ServoPositionFeedback& local_feedback = local_feedback_list[servo_id];
 
+        // Clear the line before printing (optional, for cleaner output)
+        std::cout << "\r\033[K";
         std::cout << std::showpos << std::fixed << std::setprecision(3)
           << "Servo ID: " << servo_id << " | "
           << "Elapsed: " << std::setw(12) << elapsed_ms << " ms | "
@@ -474,9 +480,8 @@ int main(int argc, char** argv) {
     }
 
     std::cout << "Completed printing loop.\n";
-
-    return; 
-  }; 
+    return;
+  };
 
   /**********************/
   /** Threads **/

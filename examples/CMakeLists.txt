@@ -129,7 +129,7 @@ else() # 64 bits
 
     # diagnostic_single_servo
     add_executable( diagnostic_single_servo_64 
-        diagnostic_single_servo.cc
+        servo_diagnostic/diagnostic_single_servo.cc
     )
     target_include_directories( diagnostic_single_servo_64 PUBLIC 
         ${MJBOTSCPP_INCLUDE_DIRS}
@@ -147,9 +147,32 @@ else() # 64 bits
         # BUILD_RPATH "$ORIGIN/../lib"
     )
 
+    # diagnostic_multiple_servos
+    find_package(yaml-cpp REQUIRED)
+    add_executable( diagnostic_multiple_servos_64 
+        servo_diagnostic/diagnostic_multiple_servos.cc
+    )
+    target_include_directories( diagnostic_multiple_servos_64 PUBLIC 
+        ${MJBOTSCPP_INCLUDE_DIRS}
+        ${BCM_HOST_INCLUDE_DIR}
+        ${YAML_CPP_INCLUDE_DIR}
+    )
+    target_link_libraries( diagnostic_multiple_servos_64 
+        ${MJBOTSCPP_LIBRARIES}
+        ${BCM_HOST_LIBRARY}
+        yaml-cpp
+    )
+    set_target_properties( diagnostic_multiple_servos_64 
+        PROPERTIES 
+        CLEAN_DIRECT_OUTPUT 1 
+        RUNTIME_OUTPUT_DIRECTORY "${BIN_OUTPUT_DIR}"
+        BUILD_RPATH "${LIB_OUTPUT_DIR}"
+        # BUILD_RPATH "$ORIGIN/../lib"
+    )
+
     # control_single_servo
     add_executable( control_single_servo_64 
-        control_single_servo.cc
+        servo_control/control_single_servo.cc
     )
     target_include_directories( control_single_servo_64 PUBLIC 
         ${MJBOTSCPP_INCLUDE_DIRS}
@@ -170,7 +193,7 @@ else() # 64 bits
     # control_multiple_servos
     find_package(yaml-cpp REQUIRED)
     add_executable( control_multiple_servos_64 
-        control_multiple_servos.cc
+        servo_control/control_multiple_servos.cc
     )
     target_include_directories( control_multiple_servos_64 PUBLIC 
         ${MJBOTSCPP_INCLUDE_DIRS}

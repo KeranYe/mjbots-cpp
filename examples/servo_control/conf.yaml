@@ -8,8 +8,8 @@ timing_parameters:
   loop_move_ms: 2
   loop_idle_ms: 2
   loop_print_ms: 200
-  loop_move_duration_s: 10
-  loop_idle_duration_s: 30
+  loop_move_duration_s: 30
+  loop_idle_duration_s: 10
 
 trajectory_parameters:
   position_increment: 0.001
