@@ -110,6 +110,13 @@ pingServo() {
 CUR_PWD=$(pwd)
 showWhere
 
+# syntax
+if [[ "$1" == "--help" ]]; then
+    printf $'\e[1;35mUsage: %s --target <servo_id> --firmware <firmware_file_path> --config-dir <config_directory_path>\n\e[0m' "$0"
+    printf $'\e[1;35mExample: %s --target 1 --firmware ~/Downloads/moteus_fw.elf --config-dir ~/servo_config\n\e[0m' "$0"
+    exit 0
+fi
+
 # parse input arguments
 TARGET_SERVO_ID=""
 FIRMWARE_FILE_PATH=""

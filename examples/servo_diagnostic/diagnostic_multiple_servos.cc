@@ -165,10 +165,10 @@ int main(int argc, char** argv) {
   std::cout << "Stopped servos successfully." << std::endl; 
   // if (clear_servo_error() != 0) return 1;
 
-  std::cout << "Setting servo configurations..." << std::endl;
-  // if (mjbotscpp::ServosConfSet( new_config, moteus_controller_list ) != 0) return 1;
-  if (mjbotscpp::ServosConfSet( servo_config_with_id_list, moteus_controller_list ) != 0) return 1;
-  std::cout << "Set servo configurations successfully." << std::endl;
+  // std::cout << "Setting servo configurations..." << std::endl;
+  // // if (mjbotscpp::ServosConfSet( new_config, moteus_controller_list ) != 0) return 1;
+  // if (mjbotscpp::ServosConfSet( servo_config_with_id_list, moteus_controller_list ) != 0) return 1;
+  // std::cout << "Set servo configurations successfully." << std::endl;
 
   std::cout << "Fetching servo information..." << std::endl;
   std::cout << mjbotscpp::ServosInfo(moteus_controller_list) << std::endl;
@@ -337,9 +337,9 @@ int main(int argc, char** argv) {
           << "Elapsed: " << std::setw(12) << elapsed_ms << " ms | "
           << "[Feedback] Mode:" << std::noshowpos << std::dec << std::setw(2) << static_cast<int>(local_feedback.mode)
           << std::showpos
-          << ", Pos =" << std::setw(8) << local_feedback.position_feedback.position
-          << ", Vel =" << std::setw(8) << local_feedback.position_feedback.velocity
-          << ", Trq =" << std::setw(8) << local_feedback.position_feedback.feedforward_torque
+          << ", Pos [deg] =" << std::setw(8) << local_feedback.position_feedback.position * 360.0 // convert from rot to deg
+          << ", Vel [deg/s] =" << std::setw(8) << local_feedback.position_feedback.velocity * 360.0 // convert from rot/s to deg/s
+          << ", Trq [Nm] =" << std::setw(8) << local_feedback.position_feedback.feedforward_torque
           << std::endl << std::noshowpos;
       }
 
