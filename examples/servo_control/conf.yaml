@@ -1,5 +1,5 @@
 can_servo_map: # can_bus : [servo_ids]
-  1: [1,3]
+  1: [21,23]
   2: []
   3: []
   4: []
@@ -9,7 +9,7 @@ timing_parameters:
   loop_idle_ms: 2
   loop_print_ms: 200
   loop_move_duration_s: 30
-  loop_idle_duration_s: 10
+  loop_idle_duration_s: 30
 
 trajectory_parameters:
   position_increment: 0.001

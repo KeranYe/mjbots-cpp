@@ -21,29 +21,14 @@
 
 #include "moteus.h"
 #include "pi3hat_moteus_transport.h"
-#include "mjbotscpp.h"
+// #include "mjbotscpp.h"
+#include "mjbotscpp_interface.h"
 
 using namespace mjbots;
 using Transport = pi3hat::Pi3HatMoteusTransport;
+using Interface = mjbotscpp::Pi3HatMoteusInterface; 
+using Data = mjbotscpp::Pi3HatMoteusData; 
 
-
-struct ServoPositionFeedback {
-  moteus::Mode mode;  
-  moteus::PositionMode::Command position_feedback;
-};
-
-void reset_servo_cmd(moteus::PositionMode::Command& pos_cmd) {
-  pos_cmd.position = std::numeric_limits<float>::quiet_NaN();
-  pos_cmd.velocity = 0.0;
-  pos_cmd.feedforward_torque = 0.0;
-}
-
-void reset_servo_feedback(ServoPositionFeedback& servo_feedback) {
-  servo_feedback.mode = moteus::Mode::kStopped;
-  servo_feedback.position_feedback.position = std::numeric_limits<float>::quiet_NaN();
-  servo_feedback.position_feedback.velocity = 0.0;
-  servo_feedback.position_feedback.feedforward_torque = 0.0;
-}
 
 double servo_sinusoid_trajectory_next(double time_s, double pos_initial = 0.0, double position_increment = 0.001, double frequency = 0.1) {
   const double amplitude = position_increment * 1000; // rot
@@ -156,27 +141,29 @@ int main(int argc, char** argv) {
     new_config.reduction_ratio = 1.0/6.0; // default to 6:1 reduction, which is used in qdd100 servos
   }
 
-  // Pi3hat Transport
+  // Pi3hat Interface
   Transport::Options pi3hat_options;
-  pi3hat_options.servo_map = servo_map;
-  pi3hat_options.attitude_rate_hz = 100;
-  pi3hat_options.enable_aux = false;
+  {
+    pi3hat_options.cpu = 0; // CPU core to pin the pi3hat transport thread to
+    pi3hat_options.servo_map = servo_map;
+    pi3hat_options.attitude_rate_hz = 100;
+    pi3hat_options.enable_aux = false;
 
-  pi3hat_options.mounting_deg.pitch = 0;
-  pi3hat_options.mounting_deg.yaw = 0;
-  pi3hat_options.mounting_deg.roll = 0;
+    pi3hat_options.mounting_deg.pitch = 0;
+    pi3hat_options.mounting_deg.yaw = 0;
+    pi3hat_options.mounting_deg.roll = 0;
+  }
+  // auto pi3hat_transport = std::make_shared<Transport>(pi3hat_options);
+  auto pi3hat_interface = std::make_shared<Interface>(pi3hat_options); 
 
-  auto pi3hat_transport = std::make_shared<Transport>(pi3hat_options);
-
-  // pi3hat::Attitude attitude;
-
-  // Moteus controllers with configurations for each servo
+  // Moteus Controllers 
   std::vector<moteus::Controller::Options> moteus_options_list;
   std::vector<std::shared_ptr<mjbots::moteus::Controller>> moteus_controller_list;
   std::vector<mjbotscpp::ServoConfigWithID> servo_config_with_id_list;
+  
   for (const auto& [servo_id, can_bus] : servo_map) {
     moteus::Controller::Options moteus_options;
-    moteus_options.transport = pi3hat_transport;
+    moteus_options.transport = pi3hat_interface;
     moteus_options.id = servo_id;
     moteus_options.bus = can_bus;
     auto moteus_controller = std::make_shared<mjbots::moteus::Controller>(moteus_options);
@@ -189,6 +176,24 @@ int main(int argc, char** argv) {
     servo_config_with_id.config = new_config;
     servo_config_with_id_list.push_back(servo_config_with_id);
   }
+
+  // Pi3Hat-Moteus Data - pre-seed both buffers with all servo IDs to avoid dynamic allocation
+  mjbotscpp::DoubleBufferedServoCommands::Map init_cmds;
+  mjbotscpp::DoubleBufferedServoReplies::Map init_replies;
+  for (const auto& [servo_id, can_bus] : servo_map) {
+    init_cmds[servo_id] = mjbotscpp::ServoCommand{};
+    init_replies[servo_id] = mjbotscpp::ServoReply{};
+  }
+  mjbotscpp::DoubleBufferedServoCommands servo_commands(servo_map.size(), init_cmds);
+  mjbotscpp::DoubleBufferedServoReplies servo_replies(servo_map.size(), init_replies);
+
+  mjbotscpp::Pi3HatMoteusData pi3hat_moteus_data(servo_map.size());
+  pi3hat_moteus_data.commands = &servo_commands;
+  pi3hat_moteus_data.replies = &servo_replies;
+
+
+  // clear stale replies in buses
+  pi3hat_interface->Init(); 
   
   // initialize servo
   std::cout << "Stopping servos..." << std::endl;
@@ -211,25 +216,7 @@ int main(int argc, char** argv) {
   
 
   // start servo
-
-  std::vector<moteus::CanFdFrame> frames;
-  std::vector<moteus::CanFdFrame> replies;
-
-  std::map< int, ServoPositionFeedback > servo_feedback_list; 
-  for (const auto& [servo_id, can_bus] : servo_map) {
-    ServoPositionFeedback servo_feedback;
-    reset_servo_feedback( servo_feedback );
-    servo_feedback_list[servo_id] = servo_feedback;
-  }
-
-  std::map< int, moteus::PositionMode::Command > pos_cmd_list;
-  for (const auto& [servo_id, can_bus] : servo_map) {
-    moteus::PositionMode::Command pos_cmd;
-    reset_servo_cmd( pos_cmd );
-    pos_cmd_list[servo_id] = pos_cmd;
-  }
-
-  std::mutex data_mutex;
+  std::mutex data_mutex; // protects shared elapsed_time
 
 
   // only start when pressed key r
@@ -247,6 +234,12 @@ int main(int argc, char** argv) {
   /** Lambda Functions **/
   /**********************/
 
+  constexpr int kMovingAvgWindow = 100;
+  std::atomic<long> worst_move_exec_us{0};
+  std::atomic<long> worst_idle_exec_us{0};
+  std::atomic<long> avg_move_exec_us{0};
+  std::atomic<long> avg_idle_exec_us{0};
+
   std::promise<void> move_thread_promise_completed;
   std::future<void> move_thread_future_completed = move_thread_promise_completed.get_future();
 
@@ -255,15 +248,18 @@ int main(int argc, char** argv) {
 
   auto move_thread_func = [&]() {
     std::cout << "Starting moving loop for " << loop_move_duration_s << " seconds...\n";
-    
+
     const auto thread_start_time = std::chrono::steady_clock::now();
     std::chrono::nanoseconds thread_elapsed_time = std::chrono::nanoseconds::zero();
+    auto next_wake_time = thread_start_time;
+
+    long move_exec_window[kMovingAvgWindow] = {};
+    long move_exec_sum = 0;
+    int  move_exec_idx = 0;
 
     while (true) {
+      const auto iter_start = std::chrono::steady_clock::now();
 
-      frames.clear();
-      replies.clear();
-      
       {
         std::lock_guard<std::mutex> lock(data_mutex);
         thread_elapsed_time = std::chrono::steady_clock::now() - thread_start_time;
@@ -273,67 +269,60 @@ int main(int argc, char** argv) {
         }
       }
 
-      // if (std::chrono::duration_cast<std::chrono::seconds>(elapsed_time).count() >= loop_duration_s) {
-      //   break;
-      // }
-
-      // Update command under lock since print thread reads `pos_cmd`.
-      for (const auto& [servo_id, can_bus] : servo_map) {
+      // Read elapsed time under lock (local copy)
+      std::chrono::nanoseconds local_elapsed;
+      {
         std::lock_guard<std::mutex> lock(data_mutex);
+        local_elapsed = elapsed_time;
+      }
 
-        moteus::PositionMode::Command& pos_cmd = pos_cmd_list[servo_id];
-        ServoPositionFeedback& servo_feedback = servo_feedback_list[servo_id];
-        if (std::isnan(servo_feedback.position_feedback.position)) {
-          // std::lock_guard<std::mutex> lock(data_mutex);
-          pos_cmd.position = pos_initial; // move to initial position if no feedback
-          pos_cmd.velocity = 0.0;
-          pos_cmd.feedforward_torque = 0.0;
-        } else {
-          // std::lock_guard<std::mutex> lock(data_mutex);
-          // pos_cmd.position = pos_initial 
-                              // + static_cast<double>(std::chrono::duration_cast<std::chrono::milliseconds>(elapsed_time).count()) * position_increment; // move incrementally
-          pos_cmd.position = servo_sinusoid_trajectory_next(
-            std::chrono::duration_cast<std::chrono::milliseconds>(elapsed_time).count() / 1e3,
-            pos_initial,
-            position_increment,
-            0.1 // frequency, Hz
-          );
-          pos_cmd.velocity = velocity_limit; // set velocity limit
-          pos_cmd.feedforward_torque = 0.0;
+      // Write position commands into the back buffer based on latest feedback
+      {
+        const auto& feedback = servo_replies.Read();
+        auto& cmds = servo_commands.BackBuffer();
+        for (const auto& [servo_id, can_bus] : servo_map) {
+          auto& cmd = cmds[servo_id];
+          cmd.mode = moteus::Mode::kPosition;
+          auto it = feedback.find(servo_id);
+          const bool has_feedback = (it != feedback.end()) && it->second.valid &&
+                                    !std::isnan(it->second.result.position);
+          if (!has_feedback) {
+            cmd.position.position = pos_initial;
+            cmd.position.velocity = 0.0;
+            cmd.position.feedforward_torque = 0.0;
+          } else {
+            cmd.position.position = servo_sinusoid_trajectory_next(
+              std::chrono::duration_cast<std::chrono::milliseconds>(local_elapsed).count() / 1e3,
+              pos_initial, position_increment, 0.1
+            );
+            cmd.position.velocity = velocity_limit;
+            cmd.position.feedforward_torque = 0.0;
+          }
         }
+        servo_commands.Publish();
       }
 
-      // frames.push_back(moteus_controller->MakePosition(pos_cmd));
-      for (auto& moteus_controller : moteus_controller_list) {
-        const int servo_id = moteus_controller->options().id;
-        const moteus::PositionMode::Command& pos_cmd = pos_cmd_list[servo_id];
-        frames.push_back(moteus_controller->MakePosition(pos_cmd));
-      }
-
+      // Cycle: Commands2CanFdFrames → send → receive
       moteus::BlockingCallback cbk;
-      pi3hat_transport->Cycle(frames.data(), frames.size(),
-                      &replies, nullptr,
-                      nullptr, nullptr,
-                      cbk.callback());
+      pi3hat_interface->Cycle(moteus_controller_list, pi3hat_moteus_data, cbk.callback());
       cbk.Wait();
 
-      // parse feedback
-      for ( const auto& frame : replies ) {
-        const int servo_id = frame.source;
-        if ( servo_map.find(servo_id) == servo_map.end() ) {
-          continue; // skip if not in servo_map
-        }
-        ServoPositionFeedback& servo_feedback = servo_feedback_list[servo_id];
-        const auto result = moteus::Query::Parse(frame.data, frame.size);
+      // // Parse received CAN frames into servo_replies double buffer
+      // pi3hat_moteus_data.CanFdFrames2Replies();
 
-        std::lock_guard<std::mutex> lock(data_mutex);
-        servo_feedback.mode = result.mode;
-        servo_feedback.position_feedback.position = result.position;
-        servo_feedback.position_feedback.velocity = result.velocity;
-        servo_feedback.position_feedback.feedforward_torque = result.torque;
+      const long exec_us = std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now() - iter_start).count();
+      if (exec_us > worst_move_exec_us.load(std::memory_order_relaxed)) {
+        worst_move_exec_us.store(exec_us, std::memory_order_relaxed);
       }
+      move_exec_sum -= move_exec_window[move_exec_idx];
+      move_exec_window[move_exec_idx] = exec_us;
+      move_exec_sum += exec_us;
+      move_exec_idx = (move_exec_idx + 1) % kMovingAvgWindow;
+      avg_move_exec_us.store(move_exec_sum / kMovingAvgWindow, std::memory_order_relaxed);
 
-      std::this_thread::sleep_for(std::chrono::milliseconds(loop_move_ms));
+      next_wake_time += std::chrono::milliseconds(loop_move_ms);
+      std::this_thread::sleep_until(next_wake_time);
     }
 
     std::cout << "Completed moving loop.\n";
@@ -350,12 +339,15 @@ int main(int argc, char** argv) {
 
     const auto thread_start_time = std::chrono::steady_clock::now();
     std::chrono::nanoseconds thread_elapsed_time = std::chrono::nanoseconds::zero();
+    auto next_wake_time = thread_start_time;
+
+    long idle_exec_window[kMovingAvgWindow] = {};
+    long idle_exec_sum = 0;
+    int  idle_exec_idx = 0;
 
     while (true) {
+      const auto iter_start = std::chrono::steady_clock::now();
 
-      frames.clear();
-      replies.clear();
-      
       {
         std::lock_guard<std::mutex> lock(data_mutex);
         thread_elapsed_time = std::chrono::steady_clock::now() - thread_start_time;
@@ -365,58 +357,36 @@ int main(int argc, char** argv) {
         }
       }
 
-      // if (std::chrono::duration_cast<std::chrono::seconds>(elapsed_time).count() >= loop_duration_s) {
-      //   break;
-      // }
-
-      // Update command under lock since print thread reads `pos_cmd`.
-      for (const auto& [servo_id, can_bus] : servo_map) {
-        std::lock_guard<std::mutex> lock(data_mutex);
-
-        // quiet_NaN command: maintain current position
-        moteus::PositionMode::Command& pos_cmd = pos_cmd_list[servo_id];
-        ServoPositionFeedback& servo_feedback = servo_feedback_list[servo_id];
-        pos_cmd.position = std::numeric_limits<double>::quiet_NaN(); // move to initial position if no feedback
-        pos_cmd.velocity = std::numeric_limits<double>::quiet_NaN();
-        pos_cmd.feedforward_torque = std::numeric_limits<double>::quiet_NaN();
+      // Write stop commands into the back buffer
+      {
+        auto& cmds = servo_commands.BackBuffer();
+        for (const auto& [servo_id, can_bus] : servo_map) {
+          cmds[servo_id].mode = moteus::Mode::kStopped;
+        }
+        servo_commands.Publish();
       }
 
-      // frames.push_back(moteus_controller->MakePosition(pos_cmd));
-      for (auto& moteus_controller : moteus_controller_list) {
-        const int servo_id = moteus_controller->options().id;
-        const moteus::PositionMode::Command& pos_cmd = pos_cmd_list[servo_id];
-
-        // frames.push_back(moteus_controller->MakePosition(pos_cmd)); // send quiet_NaN command to maintain current position
-
-        // frames.push_back(moteus_controller->MakeQuery()); // send query command to get feedback while idling, current on, with some friction
-
-        frames.push_back(moteus_controller->MakeStop()); // send stop command to get feedback while idling, current off, no friction
-      }
-
+      // Cycle: sends stop commands, receives replies
       moteus::BlockingCallback cbk;
-      pi3hat_transport->Cycle(frames.data(), frames.size(),
-                      &replies, nullptr,
-                      nullptr, nullptr,
-                      cbk.callback());
+      pi3hat_interface->Cycle(moteus_controller_list, pi3hat_moteus_data, cbk.callback());
       cbk.Wait();
 
-      // parse feedback
-      for ( const auto& frame : replies ) {
-        const int servo_id = frame.source;
-        if ( servo_map.find(servo_id) == servo_map.end() ) {
-          continue; // skip if not in servo_map
-        }
-        ServoPositionFeedback& servo_feedback = servo_feedback_list[servo_id];
-        const auto result = moteus::Query::Parse(frame.data, frame.size);
+      // // Parse received CAN frames into servo_replies double buffer
+      // pi3hat_moteus_data.CanFdFrames2Replies();
 
-        std::lock_guard<std::mutex> lock(data_mutex);
-        servo_feedback.mode = result.mode;
-        servo_feedback.position_feedback.position = result.position;
-        servo_feedback.position_feedback.velocity = result.velocity;
-        servo_feedback.position_feedback.feedforward_torque = result.torque;
+      const long exec_us = std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now() - iter_start).count();
+      if (exec_us > worst_idle_exec_us.load(std::memory_order_relaxed)) {
+        worst_idle_exec_us.store(exec_us, std::memory_order_relaxed);
       }
+      idle_exec_sum -= idle_exec_window[idle_exec_idx];
+      idle_exec_window[idle_exec_idx] = exec_us;
+      idle_exec_sum += exec_us;
+      idle_exec_idx = (idle_exec_idx + 1) % kMovingAvgWindow;
+      avg_idle_exec_us.store(idle_exec_sum / kMovingAvgWindow, std::memory_order_relaxed);
 
-      std::this_thread::sleep_for(std::chrono::milliseconds(loop_idle_ms));
+      next_wake_time += std::chrono::milliseconds(loop_idle_ms);
+      std::this_thread::sleep_until(next_wake_time);
     }
 
     std::cout << "Completed idle loop.\n";
@@ -429,52 +399,62 @@ int main(int argc, char** argv) {
     size_t num_servos = servo_map.size();
     bool first_print = true;
     while (true) {
-      // Copy shared data under lock to minimize hold time.
-      std::chrono::nanoseconds local_elapsed_time;
-      std::map<int, moteus::PositionMode::Command> local_cmd_list;
-      std::map<int, ServoPositionFeedback> local_feedback_list;
-      {
-        std::lock_guard<std::mutex> lock(data_mutex);
-        local_elapsed_time = elapsed_time;
-        local_cmd_list = pos_cmd_list;
-        local_feedback_list = servo_feedback_list;
-      }
-
       // future-based loop exit condition
       if (move_thread_future_completed.wait_for(std::chrono::seconds(0)) == std::future_status::ready &&
           idle_thread_future_completed.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
         break;
       }
 
+      // Read elapsed time under lock; commands/replies are lock-free via double buffer
+      std::chrono::nanoseconds local_elapsed_time;
+      {
+        std::lock_guard<std::mutex> lock(data_mutex);
+        local_elapsed_time = elapsed_time;
+      }
+      const auto& local_cmds    = servo_commands.Read();
+      const auto& local_replies = servo_replies.Read();
+
       double elapsed_ms = local_elapsed_time.count() / 1e6;
 
       // Move cursor up to overwrite previous output (except first print)
       if (!first_print) {
-        // Move cursor up by num_servos lines
-        std::cout << "\033[" << num_servos << "A";
+        std::cout << "\033[" << (num_servos + 2) << "A";
       } else {
         first_print = false;
       }
 
       for (const auto& [servo_id, can_bus] : servo_map) {
-        const moteus::PositionMode::Command& local_cmd = local_cmd_list[servo_id];
-        const ServoPositionFeedback& local_feedback = local_feedback_list[servo_id];
+        auto cmd_it = local_cmds.find(servo_id);
+        auto rep_it = local_replies.find(servo_id);
+        const auto& pos_cmd = (cmd_it != local_cmds.end()) ? cmd_it->second.position : moteus::PositionMode::Command{};
+        const auto& reply   = (rep_it != local_replies.end()) ? rep_it->second : mjbotscpp::ServoReply{};
 
-        // Clear the line before printing (optional, for cleaner output)
         std::cout << "\r\033[K";
         std::cout << std::showpos << std::fixed << std::setprecision(3)
           << "Servo ID: " << servo_id << " | "
           << "Elapsed: " << std::setw(12) << elapsed_ms << " ms | "
-          << "[Command] Pos:" << std::setw(8) << local_cmd.position
-          << " Vel:" << std::setw(8) << local_cmd.velocity
-          << " Trq:" << std::setw(8) << local_cmd.feedforward_torque
-          << " | [Feedback] Mode:" << std::noshowpos << std::dec << std::setw(2) << static_cast<int>(local_feedback.mode)
+          << "[Command] Pos (deg):" << std::setw(8) << pos_cmd.position * 360.0 // rot to deg 
+          << " Vel (deg/s):" << std::setw(8) << pos_cmd.velocity * 360.0 // rot/s to deg/s
+          << " Trq (Nm):" << std::setw(8) << pos_cmd.feedforward_torque
+          << " | [Feedback] Mode:" << std::noshowpos << std::dec << std::setw(2) << static_cast<int>(reply.result.mode)
           << std::showpos
-          << " Pos:" << std::setw(8) << local_feedback.position_feedback.position
-          << " Vel:" << std::setw(8) << local_feedback.position_feedback.velocity
-          << " Trq:" << std::setw(8) << local_feedback.position_feedback.feedforward_torque
+          << " Pos (deg):" << std::setw(8) << reply.result.position * 360.0 // rot to deg
+          << " Vel (deg/s):" << std::setw(8) << reply.result.velocity * 360.0 // rot/s to deg/s
+          << " Trq (Nm):" << std::setw(8) << reply.result.torque
           << std::endl << std::noshowpos;
       }
+
+      std::cout << "\r\033[K"
+        << std::noshowpos
+        << "Worst exec: [Move] " << std::setw(8) << worst_move_exec_us.load(std::memory_order_relaxed) << " us"
+        << "  [Idle] "  << std::setw(8) << worst_idle_exec_us.load(std::memory_order_relaxed)  << " us"
+        << "  (period: move " << loop_move_ms*1000 << " us, idle " << loop_idle_ms*1000 << " us)"
+        << std::endl
+        << "\r\033[K"
+        << "Avg  exec: [Move] " << std::setw(8) << avg_move_exec_us.load(std::memory_order_relaxed)  << " us"
+        << "  [Idle] "  << std::setw(8) << avg_idle_exec_us.load(std::memory_order_relaxed)   << " us"
+        << "  (window: " << kMovingAvgWindow << " iters)"
+        << std::endl;
 
       std::this_thread::sleep_for(std::chrono::milliseconds(loop_print_ms));
     }
