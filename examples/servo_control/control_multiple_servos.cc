@@ -23,9 +23,10 @@
 #include "pi3hat_moteus_transport.h"
 // #include "mjbotscpp.h"
 #include "mjbotscpp_interface.h"
+#include "mjbotscpp_util.h"
 
 using namespace mjbots;
-using Transport = pi3hat::Pi3HatMoteusTransport;
+// using Transport = pi3hat::Pi3HatMoteusTransport;
 using Interface = mjbotscpp::Pi3HatMoteusInterface; 
 using Data = mjbotscpp::Pi3HatMoteusData; 
 
@@ -142,7 +143,7 @@ int main(int argc, char** argv) {
   }
 
   // Pi3hat Interface
-  Transport::Options pi3hat_options;
+  Interface::Options pi3hat_options;
   {
     pi3hat_options.cpu = 0; // CPU core to pin the pi3hat transport thread to
     pi3hat_options.servo_map = servo_map;
@@ -235,10 +236,17 @@ int main(int argc, char** argv) {
   /**********************/
 
   constexpr int kMovingAvgWindow = 100;
-  std::atomic<long> worst_move_exec_us{0};
-  std::atomic<long> worst_idle_exec_us{0};
-  std::atomic<long> avg_move_exec_us{0};
-  std::atomic<long> avg_idle_exec_us{0};
+  mjbotscpp::TimerMonitor move_monitor(kMovingAvgWindow);
+  const size_t kMoveIter  = move_monitor.Register("iter");
+  const size_t kMoveMutex = move_monitor.Register("mutex");
+  const size_t kMoveCmd   = move_monitor.Register("cmd_write");
+  const size_t kMoveCycle = move_monitor.Register("cycle");
+
+  mjbotscpp::TimerMonitor idle_monitor(kMovingAvgWindow);
+  const size_t kIdleIter  = idle_monitor.Register("iter");
+  const size_t kIdleMutex = idle_monitor.Register("mutex");
+  const size_t kIdleCmd   = idle_monitor.Register("cmd_write");
+  const size_t kIdleCycle = idle_monitor.Register("cycle");
 
   std::promise<void> move_thread_promise_completed;
   std::future<void> move_thread_future_completed = move_thread_promise_completed.get_future();
@@ -253,31 +261,25 @@ int main(int argc, char** argv) {
     std::chrono::nanoseconds thread_elapsed_time = std::chrono::nanoseconds::zero();
     auto next_wake_time = thread_start_time;
 
-    long move_exec_window[kMovingAvgWindow] = {};
-    long move_exec_sum = 0;
-    int  move_exec_idx = 0;
-
     while (true) {
-      const auto iter_start = std::chrono::steady_clock::now();
+      move_monitor.Start(kMoveIter);
 
+      // Update shared elapsed_time and read a local copy, all under one lock
+      std::chrono::nanoseconds local_elapsed;
       {
+        mjbotscpp::ScopedTimer t(move_monitor, kMoveMutex);
         std::lock_guard<std::mutex> lock(data_mutex);
         thread_elapsed_time = std::chrono::steady_clock::now() - thread_start_time;
         elapsed_time = std::chrono::steady_clock::now() - start_time;
+        local_elapsed = elapsed_time;
         if (std::chrono::duration_cast<std::chrono::seconds>(thread_elapsed_time).count() >= loop_move_duration_s) {
           break;
         }
       }
 
-      // Read elapsed time under lock (local copy)
-      std::chrono::nanoseconds local_elapsed;
-      {
-        std::lock_guard<std::mutex> lock(data_mutex);
-        local_elapsed = elapsed_time;
-      }
-
       // Write position commands into the back buffer based on latest feedback
       {
+        mjbotscpp::ScopedTimer t(move_monitor, kMoveCmd);
         const auto& feedback = servo_replies.Read();
         auto& cmds = servo_commands.BackBuffer();
         for (const auto& [servo_id, can_bus] : servo_map) {
@@ -303,23 +305,14 @@ int main(int argc, char** argv) {
       }
 
       // Cycle: Commands2CanFdFrames → send → receive
-      moteus::BlockingCallback cbk;
-      pi3hat_interface->Cycle(moteus_controller_list, pi3hat_moteus_data, cbk.callback());
-      cbk.Wait();
-
-      // // Parse received CAN frames into servo_replies double buffer
-      // pi3hat_moteus_data.CanFdFrames2Replies();
-
-      const long exec_us = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::steady_clock::now() - iter_start).count();
-      if (exec_us > worst_move_exec_us.load(std::memory_order_relaxed)) {
-        worst_move_exec_us.store(exec_us, std::memory_order_relaxed);
+      {
+        mjbotscpp::ScopedTimer t(move_monitor, kMoveCycle);
+        moteus::BlockingCallback cbk;
+        pi3hat_interface->Cycle(moteus_controller_list, pi3hat_moteus_data, cbk.callback());
+        cbk.Wait();
       }
-      move_exec_sum -= move_exec_window[move_exec_idx];
-      move_exec_window[move_exec_idx] = exec_us;
-      move_exec_sum += exec_us;
-      move_exec_idx = (move_exec_idx + 1) % kMovingAvgWindow;
-      avg_move_exec_us.store(move_exec_sum / kMovingAvgWindow, std::memory_order_relaxed);
+
+      move_monitor.Stop(kMoveIter);
 
       next_wake_time += std::chrono::milliseconds(loop_move_ms);
       std::this_thread::sleep_until(next_wake_time);
@@ -341,14 +334,11 @@ int main(int argc, char** argv) {
     std::chrono::nanoseconds thread_elapsed_time = std::chrono::nanoseconds::zero();
     auto next_wake_time = thread_start_time;
 
-    long idle_exec_window[kMovingAvgWindow] = {};
-    long idle_exec_sum = 0;
-    int  idle_exec_idx = 0;
-
     while (true) {
-      const auto iter_start = std::chrono::steady_clock::now();
+      idle_monitor.Start(kIdleIter);
 
       {
+        mjbotscpp::ScopedTimer t(idle_monitor, kIdleMutex);
         std::lock_guard<std::mutex> lock(data_mutex);
         thread_elapsed_time = std::chrono::steady_clock::now() - thread_start_time;
         elapsed_time = std::chrono::steady_clock::now() - start_time;
@@ -359,6 +349,7 @@ int main(int argc, char** argv) {
 
       // Write stop commands into the back buffer
       {
+        mjbotscpp::ScopedTimer t(idle_monitor, kIdleCmd);
         auto& cmds = servo_commands.BackBuffer();
         for (const auto& [servo_id, can_bus] : servo_map) {
           cmds[servo_id].mode = moteus::Mode::kStopped;
@@ -367,23 +358,14 @@ int main(int argc, char** argv) {
       }
 
       // Cycle: sends stop commands, receives replies
-      moteus::BlockingCallback cbk;
-      pi3hat_interface->Cycle(moteus_controller_list, pi3hat_moteus_data, cbk.callback());
-      cbk.Wait();
-
-      // // Parse received CAN frames into servo_replies double buffer
-      // pi3hat_moteus_data.CanFdFrames2Replies();
-
-      const long exec_us = std::chrono::duration_cast<std::chrono::microseconds>(
-          std::chrono::steady_clock::now() - iter_start).count();
-      if (exec_us > worst_idle_exec_us.load(std::memory_order_relaxed)) {
-        worst_idle_exec_us.store(exec_us, std::memory_order_relaxed);
+      {
+        mjbotscpp::ScopedTimer t(idle_monitor, kIdleCycle);
+        moteus::BlockingCallback cbk;
+        pi3hat_interface->Cycle(moteus_controller_list, pi3hat_moteus_data, cbk.callback());
+        cbk.Wait();
       }
-      idle_exec_sum -= idle_exec_window[idle_exec_idx];
-      idle_exec_window[idle_exec_idx] = exec_us;
-      idle_exec_sum += exec_us;
-      idle_exec_idx = (idle_exec_idx + 1) % kMovingAvgWindow;
-      avg_idle_exec_us.store(idle_exec_sum / kMovingAvgWindow, std::memory_order_relaxed);
+
+      idle_monitor.Stop(kIdleIter);
 
       next_wake_time += std::chrono::milliseconds(loop_idle_ms);
       std::this_thread::sleep_until(next_wake_time);
@@ -444,17 +426,10 @@ int main(int argc, char** argv) {
           << std::endl << std::noshowpos;
       }
 
-      std::cout << "\r\033[K"
-        << std::noshowpos
-        << "Worst exec: [Move] " << std::setw(8) << worst_move_exec_us.load(std::memory_order_relaxed) << " us"
-        << "  [Idle] "  << std::setw(8) << worst_idle_exec_us.load(std::memory_order_relaxed)  << " us"
-        << "  (period: move " << loop_move_ms*1000 << " us, idle " << loop_idle_ms*1000 << " us)"
-        << std::endl
+      std::cout << "\r\033[K" << std::noshowpos
+        << "[Move] " << move_monitor.Report() << std::endl
         << "\r\033[K"
-        << "Avg  exec: [Move] " << std::setw(8) << avg_move_exec_us.load(std::memory_order_relaxed)  << " us"
-        << "  [Idle] "  << std::setw(8) << avg_idle_exec_us.load(std::memory_order_relaxed)   << " us"
-        << "  (window: " << kMovingAvgWindow << " iters)"
-        << std::endl;
+        << "[Idle] " << idle_monitor.Report() << std::endl;
 
       std::this_thread::sleep_for(std::chrono::milliseconds(loop_print_ms));
     }
