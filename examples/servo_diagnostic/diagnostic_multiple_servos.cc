@@ -157,7 +157,7 @@ int main(int argc, char** argv) {
   pi3hat_moteus_data.replies = &servo_replies;
 
   // clear stale replies in buses
-  pi3hat_interface->Init();
+  pi3hat_interface->Init(&pi3hat_moteus_data);
 
   // initialize servo
   std::cout << "Stopping servos..." << std::endl;
@@ -279,7 +279,7 @@ int main(int argc, char** argv) {
 
       // Move cursor up to overwrite previous output (except first print)
       if (!first_print) {
-        std::cout << "\033[" << (num_servos + 1) << "A";
+        std::cout << "\033[" << (num_servos + 2) << "A";
       } else {
         first_print = false;
       }
@@ -302,7 +302,13 @@ int main(int argc, char** argv) {
       }
 
       std::cout << "\r\033[K" << std::noshowpos
-        << "[Idle] " << idle_monitor.Report() << std::endl;
+        << "[Idle] " << idle_monitor.Report() << std::endl
+        << "\r\033[K" << std::fixed << std::setprecision(4)
+        << "[Lost]  cmd: worst=" << std::setw(7) << pi3hat_interface->LostCommandRateWorst() * 100.0 << "%"
+        << " avg=" << std::setw(7) << pi3hat_interface->LostCommandRateAvg() * 100.0 << "%"
+        << "  reply: worst=" << std::setw(7) << pi3hat_interface->LostReplyRateWorst() * 100.0 << "%"
+        << " avg=" << std::setw(7) << pi3hat_interface->LostReplyRateAvg() * 100.0 << "%"
+        << std::endl;
 
       std::this_thread::sleep_for(std::chrono::milliseconds(loop_print_ms));
     }

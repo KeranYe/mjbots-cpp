@@ -52,4 +52,25 @@ struct ScopedTimer {
   ~ScopedTimer() { mon.Stop(idx); }
 };
 
+// Tracks worst-case and rolling-average of a double value (e.g. loss rates).
+// Thread-safe for concurrent reads via relaxed atomics.
+class RateMonitor {
+public:
+  explicit RateMonitor(int window = 100);
+
+  // Record a new sample.
+  void Update(double value);
+
+  double Worst() const;
+  double Avg()   const;
+
+private:
+  int window_size_;
+  std::vector<double> window_;
+  double sum_ = 0.0;
+  int widx_ = 0;
+  std::atomic<double> worst_{0.0};
+  std::atomic<double> avg_{0.0};
+};
+
 } // namespace mjbotscpp

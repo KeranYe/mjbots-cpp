@@ -22,7 +22,7 @@ Pi3HatMoteusData::Pi3HatMoteusData( const size_t max_count )
   this->_can_replies.reserve(this->_max_count);
 }
 
-const int Pi3HatMoteusData::Commands2CanFdFrames( 
+const size_t Pi3HatMoteusData::Commands2CanFdFrames( 
   const std::vector< std::shared_ptr<moteus::Controller> > &moteus_controllers, std::vector<moteus::CanFdFrame>* frames 
 ) {
   if ( this->commands == nullptr ) return 0;
@@ -53,10 +53,10 @@ const int Pi3HatMoteusData::Commands2CanFdFrames(
   return this->_can_commands.size();
 }
 
-const int Pi3HatMoteusData::CanFdFrames2Replies ( std::vector<moteus::CanFdFrame>* frames ) {
+const size_t Pi3HatMoteusData::CanFdFrames2Replies ( std::vector<moteus::CanFdFrame>* frames ) {
   if ( this->replies == nullptr ) return 0;
 
-  int update_count = 0; 
+  size_t update_count = 0; 
   auto &replies_to_write = this->replies->BackBuffer(); // get buffer to write
 
   // mark all replies as stale initially
@@ -106,7 +106,8 @@ void Pi3HatMoteusInterface::Cycle(
 )
 {
   // convert commands to can-frames  
-  data.Commands2CanFdFrames( moteus_controllers );
+  this->_last_expect_count = moteus_controllers.size();
+  this->_last_command_count = data.Commands2CanFdFrames( moteus_controllers );
   
   pi3hat::Pi3HatMoteusTransport::Cycle(
     data.CanCommands().data(), 
@@ -118,28 +119,47 @@ void Pi3HatMoteusInterface::Cycle(
     callback
   );
 
-  data.CanFdFrames2Replies(); 
+  this->_last_reply_count = data.CanFdFrames2Replies();
+  
+  // diagnostics
+  const double lost_cmd_rate = (_last_command_count < _last_expect_count)
+      ? static_cast<double>(_last_expect_count - _last_command_count) / static_cast<double>(_last_expect_count)
+      : 0.0;
+  const double lost_reply_rate = (_last_reply_count < _last_command_count)
+      ? static_cast<double>(_last_command_count - _last_reply_count) / static_cast<double>(_last_command_count)
+      : 0.0;
+  _lost_command_rate.Update(lost_cmd_rate);
+  _lost_reply_rate.Update(lost_reply_rate);
 }
 
-void Pi3HatMoteusInterface::Init()
+void Pi3HatMoteusInterface::Init( Pi3HatMoteusData* data, const int clear_retries, const int retry_sleep_ms )
 {
   // clear stale replies in bus 1 to 4
-  {
-    std::vector<moteus::CanFdFrame> replies;
-    pi3hat::Pi3Hat::Input input_override;
-    input_override.force_can_check = (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4);
+  std::vector<moteus::CanFdFrame> replies; 
+  std::vector<moteus::CanFdFrame> *replies_ptr = nullptr; 
+  if (data != nullptr) {
+    data->CanReplies().clear();
+    replies_ptr = &(data->CanReplies());
+  } else {
+    replies_ptr = &replies;
+  }
+  pi3hat::Pi3Hat::Input input_override;
+  input_override.force_can_check = (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4);
 
+  for (int i = 0; i < clear_retries; i++) {
+    replies.clear();
     moteus::BlockingCallback cbk;
     pi3hat::Pi3HatMoteusTransport::Cycle(
       nullptr, 
       0, 
-      &replies, 
+      replies_ptr, 
       nullptr, 
       nullptr,
       &input_override, 
       cbk.callback()
     );
     cbk.Wait();
+    std::this_thread::sleep_for(std::chrono::milliseconds(retry_sleep_ms));
   }
 }
 

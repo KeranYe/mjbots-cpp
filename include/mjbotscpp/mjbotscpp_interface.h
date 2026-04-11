@@ -12,7 +12,7 @@
 #include "moteus.h"
 #include "pi3hat_moteus_transport.h"
 #include "mjbotscpp.h"
-// #include "pi3hat_moteus_transport.h"
+#include "mjbotscpp_util.h"
 
 using namespace mjbots;
 
@@ -155,9 +155,9 @@ struct Pi3HatMoteusData {
    * 
    * @param moteus_controllers A vector of shared pointers to the moteus controllers.
    * @param frames A pointer to an external vector of CAN FD frames to store the command-can-frames by contents copying. If nullptr, the frames are not copied.
-   * @return const int The number of CAN FD frames generated.
+   * @return const size_t The number of CAN FD frames generated.
    */
-  const int Commands2CanFdFrames ( 
+  const size_t Commands2CanFdFrames ( 
     const std::vector< std::shared_ptr<moteus::Controller> > &moteus_controllers, 
     std::vector<moteus::CanFdFrame>* frames = nullptr 
   );
@@ -166,9 +166,9 @@ struct Pi3HatMoteusData {
    * @brief Convert CAN FD frames to servo replies.
    * 
    * @param frames A pointer to an external vector of CAN FD frames to store the reply-can-frames by contents copying. If nullptr, the frames are not copied.
-   * @return const int The number of CAN FD frames processed.
+   * @return const size_t The number of CAN FD frames processed.
    */
-  const int CanFdFrames2Replies ( std::vector<moteus::CanFdFrame>* frames = nullptr );
+  const size_t CanFdFrames2Replies ( std::vector<moteus::CanFdFrame>* frames = nullptr );
 
   const std::vector<moteus::CanFdFrame>& CanCommands() const { return _can_commands; }
   std::vector<moteus::CanFdFrame>& CanReplies() { return _can_replies; }
@@ -178,12 +178,6 @@ struct Pi3HatMoteusData {
   size_t _max_count; // maximum number of servos to reserve
   std::vector<moteus::CanFdFrame> _can_commands; // CanFdFrames corresponding to the commands
   std::vector<moteus::CanFdFrame> _can_replies; // CanFdFrames corresponding to the replies
-  
-  // std::vector<moteus::CanFdFrame> Commands2CanFdFrames ( const std::map<int, ServoCommand> &commands );
-
-  // void CanFdFrames2Replies ( const std::vector<moteus::CanFdFrame> &frames, std::map<int, ServoReply> &replies );
-
-  
 };
 
 /**
@@ -201,15 +195,29 @@ class Pi3HatMoteusInterface : public pi3hat::Pi3HatMoteusTransport {
   
   ~Pi3HatMoteusInterface();
 
+  void Init( 
+    Pi3HatMoteusData* data = nullptr, // if provided, also clear the data buffers
+    const int clear_retries = 10, 
+    const int retry_sleep_ms = 5 
+  );
+
   void Cycle( 
     const std::vector<std::shared_ptr<moteus::Controller>> &moteus_controllers, 
     Pi3HatMoteusData &data, 
     moteus::CompletionCallback callback 
   ); 
 
-  void Init();
+  const double LostCommandRateAvg()   const { return _lost_command_rate.Avg(); }
+  const double LostCommandRateWorst() const { return _lost_command_rate.Worst(); }
+  const double LostReplyRateAvg()     const { return _lost_reply_rate.Avg(); }
+  const double LostReplyRateWorst()   const { return _lost_reply_rate.Worst(); }
   
- private:
-  
+private:
+  // diagnostics
+  size_t _last_expect_count = 0;
+  size_t _last_command_count = 0;
+  size_t _last_reply_count = 0;
+  RateMonitor _lost_command_rate;
+  RateMonitor _lost_reply_rate;
 };
 } // namespace mjbotscpp

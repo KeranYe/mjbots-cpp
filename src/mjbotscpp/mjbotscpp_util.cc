@@ -56,4 +56,27 @@ std::string TimerMonitor::Report() const {
   return oss.str();
 }
 
+// --- RateMonitor ---
+
+RateMonitor::RateMonitor(int window)
+    : window_size_(window), window_(window, 0.0) {}
+
+void RateMonitor::Update(double value) {
+  const double w = worst_.load(std::memory_order_relaxed);
+  if (value > w) worst_.store(value, std::memory_order_relaxed);
+  sum_ -= window_[widx_];
+  window_[widx_] = value;
+  sum_ += value;
+  widx_ = (widx_ + 1) % window_size_;
+  avg_.store(sum_ / window_size_, std::memory_order_relaxed);
+}
+
+double RateMonitor::Worst() const {
+  return worst_.load(std::memory_order_relaxed);
+}
+
+double RateMonitor::Avg() const {
+  return avg_.load(std::memory_order_relaxed);
+}
+
 } // namespace mjbotscpp
