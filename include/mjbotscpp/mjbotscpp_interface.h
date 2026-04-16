@@ -211,6 +211,8 @@ class Pi3HatMoteusInterface : public pi3hat::Pi3HatMoteusTransport {
   const double LostCommandRateWorst() const { return _lost_command_rate.Worst(); }
   const double LostReplyRateAvg()     const { return _lost_reply_rate.Avg(); }
   const double LostReplyRateWorst()   const { return _lost_reply_rate.Worst(); }
+
+  const TimerMonitor& CycleTimer() const { return _cycle_timer; }
   
 private:
   // diagnostics
@@ -219,5 +221,13 @@ private:
   size_t _last_reply_count = 0;
   RateMonitor _lost_command_rate;
   RateMonitor _lost_reply_rate;
+  int _diag_throttle_cycles = 10; // update diagnostics every N cycles
+  int _diag_cycle_counter = 0;
+
+  // cycle timer
+  TimerMonitor _cycle_timer;
+  size_t _timer_cmd2frames = 0;
+  size_t _timer_transport  = 0;
+  size_t _timer_frames2replies = 0;
 };
 } // namespace mjbotscpp

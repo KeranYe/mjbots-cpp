@@ -9,3 +9,5 @@ timing_parameters:
   loop_print_ms: 200
   loop_idle_duration_s: 60
 
+rt_parameters:
+  pi3hat_thread_cpu_core: 3

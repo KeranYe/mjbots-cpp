@@ -68,14 +68,25 @@ const size_t Pi3HatMoteusData::CanFdFrames2Replies ( std::vector<moteus::CanFdFr
   for ( const auto & frame : this->_can_replies ) {
     const int servo_id = frame.source;
     
-    // if no corresponding reply, skip
-    if( replies_to_write.find(servo_id) == replies_to_write.end() ) {
-      continue;
-    }
+    // { // load target reply to write, if exists, otherwise skip
+    //   // if no corresponding reply, skip
+    //   if( replies_to_write.find(servo_id) == replies_to_write.end() ) {
+    //     continue;
+    //   }
 
-    replies_to_write[servo_id].valid = true;
-    replies_to_write[servo_id].result = moteus::Query::Parse(frame.data, frame.size);
-    update_count++; 
+    //   replies_to_write[servo_id].valid = true;
+    //   replies_to_write[servo_id].result = moteus::Query::Parse(frame.data, frame.size);
+    //   update_count++;
+    // } 
+
+    { // load target reply to write, if exists, otherwise skip
+      auto it = replies_to_write.find(servo_id);
+      if (it != replies_to_write.end()) {
+        it->second.valid = true;
+        it->second.result = moteus::Query::Parse(frame.data, frame.size);
+        update_count++;
+      }
+    }
   }
 
   this->replies->Publish(); // publish the back buffer as the new front
@@ -91,7 +102,9 @@ const size_t Pi3HatMoteusData::CanFdFrames2Replies ( std::vector<moteus::CanFdFr
 Pi3HatMoteusInterface::Pi3HatMoteusInterface( const Options &options)
 : pi3hat::Pi3HatMoteusTransport(options)
 {
-
+  _timer_cmd2frames    = _cycle_timer.Register("cmd2frames");
+  _timer_transport     = _cycle_timer.Register("transport");
+  _timer_frames2replies = _cycle_timer.Register("frames2replies");
 }
 
 Pi3HatMoteusInterface::~Pi3HatMoteusInterface()
@@ -107,8 +120,13 @@ void Pi3HatMoteusInterface::Cycle(
 {
   // convert commands to can-frames  
   this->_last_expect_count = moteus_controllers.size();
-  this->_last_command_count = data.Commands2CanFdFrames( moteus_controllers );
-  
+  {
+    ScopedTimer t(_cycle_timer, _timer_cmd2frames);
+    this->_last_command_count = data.Commands2CanFdFrames( moteus_controllers );
+  }
+
+  // transport timer spans the full async SPI round-trip; stopped inside the callback
+  _cycle_timer.Start(_timer_transport);
   pi3hat::Pi3HatMoteusTransport::Cycle(
     data.CanCommands().data(), 
     data.CanCommands().size(), 
@@ -116,20 +134,31 @@ void Pi3HatMoteusInterface::Cycle(
     nullptr, 
     nullptr, 
     nullptr, 
-    callback
-  );
+    [this, &data, callback](int status) {
+      // runs in child thread after SPI completes — replies are now valid
+      _cycle_timer.Stop(_timer_transport);
 
-  this->_last_reply_count = data.CanFdFrames2Replies();
-  
-  // diagnostics
-  const double lost_cmd_rate = (_last_command_count < _last_expect_count)
-      ? static_cast<double>(_last_expect_count - _last_command_count) / static_cast<double>(_last_expect_count)
-      : 0.0;
-  const double lost_reply_rate = (_last_reply_count < _last_command_count)
-      ? static_cast<double>(_last_command_count - _last_reply_count) / static_cast<double>(_last_command_count)
-      : 0.0;
-  _lost_command_rate.Update(lost_cmd_rate);
-  _lost_reply_rate.Update(lost_reply_rate);
+      {
+        ScopedTimer t(_cycle_timer, _timer_frames2replies);
+        this->_last_reply_count = data.CanFdFrames2Replies();
+      }
+
+      // diagnostics (throttled)
+      if (++_diag_cycle_counter >= _diag_throttle_cycles) {
+        _diag_cycle_counter = 0;
+        const double lost_cmd_rate = (_last_command_count < _last_expect_count)
+            ? static_cast<double>(_last_expect_count - _last_command_count) / static_cast<double>(_last_expect_count)
+            : 0.0;
+        const double lost_reply_rate = (_last_reply_count < _last_command_count)
+            ? static_cast<double>(_last_command_count - _last_reply_count) / static_cast<double>(_last_command_count)
+            : 0.0;
+        _lost_command_rate.Update(lost_cmd_rate);
+        _lost_reply_rate.Update(lost_reply_rate);
+      }
+
+      callback(status);
+    }
+  );
 }
 
 void Pi3HatMoteusInterface::Init( Pi3HatMoteusData* data, const int clear_retries, const int retry_sleep_ms )
