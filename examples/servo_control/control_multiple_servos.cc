@@ -16,6 +16,7 @@
 #include <mutex>
 #include <iomanip>
 #include <future>
+#include <sys/mman.h>
 
 #include <yaml-cpp/yaml.h>
 
@@ -128,6 +129,18 @@ int main(int argc, char** argv) {
     }
   }
 
+  // rt parameters
+  int pi3hat_thread_cpu_core = -1;
+  {
+    YAML::Node config = YAML::LoadFile(config_path);
+    const YAML::Node& rt_params = config["rt_parameters"];
+    if (rt_params && rt_params.IsMap()) {
+      if (rt_params["pi3hat_thread_cpu_core"]) pi3hat_thread_cpu_core = rt_params["pi3hat_thread_cpu_core"].as<int>(); 
+      std::cout << "Real-time parameters from config:" << std::endl;
+      std::cout << "  pi3hat_thread_cpu_core: " << pi3hat_thread_cpu_core << std::endl;
+    }
+  }
+
   mjbotscpp::ServoConfig new_config;
   {
     new_config.kp = 400.0;
@@ -145,7 +158,7 @@ int main(int argc, char** argv) {
   // Pi3hat Interface
   Interface::Options pi3hat_options;
   {
-    pi3hat_options.cpu = 0; // CPU core to pin the pi3hat transport thread to
+    pi3hat_options.cpu = pi3hat_thread_cpu_core; // CPU core to pin the pi3hat transport thread to
     pi3hat_options.servo_map = servo_map;
     pi3hat_options.attitude_rate_hz = 100;
     pi3hat_options.enable_aux = false;
@@ -153,6 +166,8 @@ int main(int argc, char** argv) {
     pi3hat_options.mounting_deg.pitch = 0;
     pi3hat_options.mounting_deg.yaw = 0;
     pi3hat_options.mounting_deg.roll = 0;
+
+    pi3hat_options.default_input.rx_baseline_wait_ns = 200000; // 0.2 ms
   }
   // auto pi3hat_transport = std::make_shared<Transport>(pi3hat_options);
   auto pi3hat_interface = std::make_shared<Interface>(pi3hat_options); 
@@ -167,6 +182,9 @@ int main(int argc, char** argv) {
     moteus_options.transport = pi3hat_interface;
     moteus_options.id = servo_id;
     moteus_options.bus = can_bus;
+    moteus_options.query_format.voltage = moteus::kIgnore; 
+    moteus_options.query_format.temperature = moteus::kIgnore;
+    moteus_options.query_format.fault = moteus::kIgnore;
     auto moteus_controller = std::make_shared<mjbots::moteus::Controller>(moteus_options);
     moteus_controller_list.push_back(moteus_controller);
     moteus_options_list.push_back(moteus_options);
@@ -192,6 +210,10 @@ int main(int argc, char** argv) {
   pi3hat_moteus_data.commands = &servo_commands;
   pi3hat_moteus_data.replies = &servo_replies;
 
+  // lock memory for real-time performance
+  if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+    std::cerr << "Warning: mlockall failed, real-time performance may be affected" << std::endl;
+  }
 
   // clear stale replies in buses
   pi3hat_interface->Init(&pi3hat_moteus_data); 
@@ -400,7 +422,7 @@ int main(int argc, char** argv) {
 
       // Move cursor up to overwrite previous output (except first print)
       if (!first_print) {
-        std::cout << "\033[" << (num_servos + 3) << "A";
+        std::cout << "\033[" << (num_servos + 4) << "A";
       } else {
         first_print = false;
       }
@@ -430,6 +452,7 @@ int main(int argc, char** argv) {
         << "[Move] " << move_monitor.Report() << std::endl
         << "\r\033[K"
         << "[Idle] " << idle_monitor.Report() << std::endl
+        << "\r\033[K" << "[Cycle] " << pi3hat_interface->CycleTimer().Report() << std::endl
         << "\r\033[K" << std::fixed << std::setprecision(4)
         << "[Lost]  cmd: worst=" << std::setw(7) << pi3hat_interface->LostCommandRateWorst() * 100.0 << "%"
         << " avg=" << std::setw(7) << pi3hat_interface->LostCommandRateAvg() * 100.0 << "%"

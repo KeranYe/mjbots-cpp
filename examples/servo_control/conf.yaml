@@ -16,3 +16,5 @@ trajectory_parameters:
   velocity_limit: 0.5
   pos_initial: 0.0
 
+rt_parameters:
+  pi3hat_thread_cpu_core: 3
