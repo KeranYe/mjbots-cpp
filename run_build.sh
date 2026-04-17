@@ -73,6 +73,17 @@ createOrCleanBuildFolder () {
     echo $folder_path
 }
 
+askThirdpartyCopyToggle () {
+    local target_name=$1
+    read -p $'\e[32mDo you want to overwrite the local thirdparty copies for '"$target_name"$' from thirdparty/? (yes/no): \e[0m' copy_choice
+    if [[ "$copy_choice" == "yes" ]]; then
+        MJBOTS_COPY_THIRDPARTY_LIBS=ON
+    else
+        MJBOTS_COPY_THIRDPARTY_LIBS=OFF
+    fi
+    echo "Info >> MJBOTS_COPY_THIRDPARTY_LIBS=${MJBOTS_COPY_THIRDPARTY_LIBS}"
+}
+
 ##############
 # Main Steps #
 ##############
@@ -104,6 +115,7 @@ case $BUILD_TARGET in
         if [[ "$skip_library_choice" != "yes" ]]; then
             # MJBOTSCPP LIBRARY
             echo $'\e[1;35mInfo >> Starting rpi32 build process: mjbotscpp32 library\e[0m'
+            askThirdpartyCopyToggle "mjbotscpp32 library"
             confirmContinue
             # build directory
             echo "Info >> Setting up build folder..."
@@ -114,7 +126,7 @@ case $BUILD_TARGET in
             echo "Info >> Running cmake for rpi32..."
             confirmContinue
             CMAKE_TOOLCHAIN_FILE_PATH=${CMAKE_PATH}/pi4b.cmake
-            cmake .. -DARCH_BITS=32 -DCMAKE_TOOLCHAIN_FILE=$CMAKE_TOOLCHAIN_FILE_PATH
+            cmake .. -DARCH_BITS=32 -DCMAKE_TOOLCHAIN_FILE=$CMAKE_TOOLCHAIN_FILE_PATH -DMJBOTS_COPY_THIRDPARTY_LIBS=${MJBOTS_COPY_THIRDPARTY_LIBS}
             echo "Info >> Building project..."
             confirmContinue
             make
@@ -162,6 +174,7 @@ case $BUILD_TARGET in
         if [[ "$skip_library_choice" != "yes" ]]; then
             # MJBOTSCPP LIBRARY
             echo $'\e[1;35mInfo >> Starting rpi64 build process: mjbotscpp64 library\e[0m'
+            askThirdpartyCopyToggle "mjbotscpp64 library"
             confirmContinue
             # build directory
             echo "Info >> Setting up build folder..."
@@ -172,7 +185,7 @@ case $BUILD_TARGET in
             echo "Info >> Running cmake for rpi64..."
             confirmContinue
             CMAKE_TOOLCHAIN_FILE_PATH=${CMAKE_PATH}/pi4b64.cmake
-            cmake .. -DARCH_BITS=64 -DCMAKE_TOOLCHAIN_FILE=$CMAKE_TOOLCHAIN_FILE_PATH
+            cmake .. -DARCH_BITS=64 -DCMAKE_TOOLCHAIN_FILE=$CMAKE_TOOLCHAIN_FILE_PATH -DMJBOTS_COPY_THIRDPARTY_LIBS=${MJBOTS_COPY_THIRDPARTY_LIBS}
             echo "Info >> Building project..."
             confirmContinue
             make

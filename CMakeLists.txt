@@ -27,6 +27,10 @@ set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
 set(MJBOTS_HEADER_DIR ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(MJBOTS_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/src)
 set(MJBOTS_EXAMPLE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/examples)
+option(MJBOTS_COPY_THIRDPARTY_LIBS
+    "Copy thirdparty moteus/pi3hat sources into include/, src/, and examples/"
+    ON)
+message(STATUS "Copy thirdparty library files: ${MJBOTS_COPY_THIRDPARTY_LIBS}")
 
 
 ############### Dependencies ######################
@@ -46,8 +50,10 @@ set(MOTEUS_HEADERS_RAW
 set(MOTEUS_SOURCES_RAW 
     # "${MOTEUS_DIR}/*.cc"
 )
-file(COPY ${MOTEUS_HEADERS_RAW} DESTINATION "${MJBOTS_HEADER_DIR}/moteus")
-file(COPY ${MOTEUS_SOURCES_RAW} DESTINATION "${MJBOTS_SOURCE_DIR}/moteus")
+if(MJBOTS_COPY_THIRDPARTY_LIBS)
+    file(COPY ${MOTEUS_HEADERS_RAW} DESTINATION "${MJBOTS_HEADER_DIR}/moteus")
+    file(COPY ${MOTEUS_SOURCES_RAW} DESTINATION "${MJBOTS_SOURCE_DIR}/moteus")
+endif()
 # redirect to files at destination recursively
 file(GLOB_RECURSE MOTEUS_HEADERS "${MJBOTS_HEADER_DIR}/moteus/*.h")
 file(GLOB_RECURSE MOTEUS_SOURCES "${MJBOTS_SOURCE_DIR}/moteus/*.cc")
@@ -68,9 +74,11 @@ set(PI3HAT_EXAMPLES_RAW
     "${PI3HAT_EXPL_DIR}/imu_transport.cc"
     "${PI3HAT_EXPL_DIR}/pi3hat_moteus_transport_register.cc"
 )
-file(COPY ${PI3HAT_HEADERS_RAW} DESTINATION "${MJBOTS_HEADER_DIR}/pi3hat")
-file(COPY ${PI3HAT_SOURCES_RAW} DESTINATION "${MJBOTS_SOURCE_DIR}/pi3hat")
-file(COPY ${PI3HAT_EXAMPLES_RAW} DESTINATION "${MJBOTS_EXAMPLE_DIR}/pi3hat")
+if(MJBOTS_COPY_THIRDPARTY_LIBS)
+    file(COPY ${PI3HAT_HEADERS_RAW} DESTINATION "${MJBOTS_HEADER_DIR}/pi3hat")
+    file(COPY ${PI3HAT_SOURCES_RAW} DESTINATION "${MJBOTS_SOURCE_DIR}/pi3hat")
+    file(COPY ${PI3HAT_EXAMPLES_RAW} DESTINATION "${MJBOTS_EXAMPLE_DIR}/pi3hat")
+endif()
 # redirect to files at destination recursively
 file(GLOB_RECURSE PI3HAT_HEADERS "${MJBOTS_HEADER_DIR}/pi3hat/*.h")
 file(GLOB_RECURSE PI3HAT_SOURCES "${MJBOTS_SOURCE_DIR}/pi3hat/*.cc")
