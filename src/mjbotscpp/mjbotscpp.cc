@@ -132,49 +132,59 @@ int ServoConfSet(const ServoConfig& new_config, std::shared_ptr<mjbots::moteus::
   std::ostringstream ostr;
   std::string response;
 
-  ostr << "conf set servo.pid_position.kp " << new_config.kp;
-  response = moteus_controller->DiagnosticCommand(ostr.str(), moteus::Controller::kExpectSingleLine);
-  moteus_controller->DiagnosticFlush();
-  ostr.str("");
-  if (response != "OK") {
-    std::cerr << "Error setting kp, response: " << response << std::endl;
-    return 1;
+  if (!std::isnan(new_config.kp)) {
+    ostr << "conf set servo.pid_position.kp " << new_config.kp;
+    response = moteus_controller->DiagnosticCommand(ostr.str(), moteus::Controller::kExpectSingleLine);
+    moteus_controller->DiagnosticFlush();
+    ostr.str("");
+    if (response != "OK") {
+      std::cerr << "Error setting kp, response: " << response << std::endl;
+      return 1;
+    }
   }
 
-  ostr << "conf set servo.pid_position.ki " << new_config.ki;
-  response = moteus_controller->DiagnosticCommand(ostr.str(), moteus::Controller::kExpectSingleLine);
-  moteus_controller->DiagnosticFlush();
-  ostr.str("");
-  if (response != "OK") {
-    std::cerr << "Error setting ki, response: " << response << std::endl;
-    return 1;
+  if (!std::isnan(new_config.ki)) {
+    ostr << "conf set servo.pid_position.ki " << new_config.ki;
+    response = moteus_controller->DiagnosticCommand(ostr.str(), moteus::Controller::kExpectSingleLine);
+    moteus_controller->DiagnosticFlush();
+    ostr.str("");
+    if (response != "OK") {
+      std::cerr << "Error setting ki, response: " << response << std::endl;
+      return 1;
+    }
   }
 
-  ostr << "conf set servo.pid_position.kd " << new_config.kd;
-  response = moteus_controller->DiagnosticCommand(ostr.str(), moteus::Controller::kExpectSingleLine);
-  moteus_controller->DiagnosticFlush();
-  ostr.str("");
-  if (response != "OK") {
-    std::cerr << "Error setting kd, response: " << response << std::endl;
-    return 1;
+  if (!std::isnan(new_config.kd)) {
+    ostr << "conf set servo.pid_position.kd " << new_config.kd;
+    response = moteus_controller->DiagnosticCommand(ostr.str(), moteus::Controller::kExpectSingleLine);
+    moteus_controller->DiagnosticFlush();
+    ostr.str("");
+    if (response != "OK") {
+      std::cerr << "Error setting kd, response: " << response << std::endl;
+      return 1;
+    }
   }
 
-  ostr << "conf set servopos.position_min " << new_config.position_min;
-  response = moteus_controller->DiagnosticCommand(ostr.str(), moteus::Controller::kExpectSingleLine);
-  moteus_controller->DiagnosticFlush();
-  ostr.str("");
-  if (response != "OK") {
-    std::cerr << "Error setting position_min, response: " << response << std::endl;
-    return 1;
+  if (!std::isnan(new_config.position_min)) {
+    ostr << "conf set servopos.position_min " << new_config.position_min;
+    response = moteus_controller->DiagnosticCommand(ostr.str(), moteus::Controller::kExpectSingleLine);
+    moteus_controller->DiagnosticFlush();
+    ostr.str("");
+    if (response != "OK") {
+      std::cerr << "Error setting position_min, response: " << response << std::endl;
+      return 1;
+    }
   }
 
-  ostr << "conf set servopos.position_max " << new_config.position_max;
-  response = moteus_controller->DiagnosticCommand(ostr.str(), moteus::Controller::kExpectSingleLine);
-  moteus_controller->DiagnosticFlush();
-  ostr.str("");
-  if (response != "OK") {
-    std::cerr << "Error setting position_max, response: " << response << std::endl;
-    return 1;
+  if (!std::isnan(new_config.position_max)) {
+    ostr << "conf set servopos.position_max " << new_config.position_max;
+    response = moteus_controller->DiagnosticCommand(ostr.str(), moteus::Controller::kExpectSingleLine);
+    moteus_controller->DiagnosticFlush();
+    ostr.str("");
+    if (response != "OK") {
+      std::cerr << "Error setting position_max, response: " << response << std::endl;
+      return 1;
+    }
   }
 
   // optional parameters

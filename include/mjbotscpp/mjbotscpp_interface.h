@@ -148,7 +148,7 @@ struct Pi3HatMoteusData {
 
  public:
   /** Major methods */
-  Pi3HatMoteusData( const size_t max_count ); 
+  explicit Pi3HatMoteusData( const size_t max_count ); 
 
   /**
    * @brief Convert servo commands to CAN FD frames.

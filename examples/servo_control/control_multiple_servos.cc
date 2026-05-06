@@ -203,12 +203,17 @@ int main(int argc, char** argv) {
     init_cmds[servo_id] = mjbotscpp::ServoCommand{};
     init_replies[servo_id] = mjbotscpp::ServoReply{};
   }
-  mjbotscpp::DoubleBufferedServoCommands servo_commands(servo_map.size(), init_cmds);
-  mjbotscpp::DoubleBufferedServoReplies servo_replies(servo_map.size(), init_replies);
 
-  mjbotscpp::Pi3HatMoteusData pi3hat_moteus_data(servo_map.size());
-  pi3hat_moteus_data.commands = &servo_commands;
-  pi3hat_moteus_data.replies = &servo_replies;
+  std::shared_ptr<mjbotscpp::DoubleBufferedServoCommands> servo_commands; 
+  std::shared_ptr<mjbotscpp::DoubleBufferedServoReplies> servo_replies; 
+  std::shared_ptr<mjbotscpp::Pi3HatMoteusData> pi3hat_moteus_data;
+
+  servo_commands = std::make_shared<mjbotscpp::DoubleBufferedServoCommands>(servo_map.size(), init_cmds);
+  servo_replies = std::make_shared<mjbotscpp::DoubleBufferedServoReplies>(servo_map.size(), init_replies);
+
+  pi3hat_moteus_data = std::make_shared<mjbotscpp::Pi3HatMoteusData>(servo_map.size());
+  pi3hat_moteus_data->commands = servo_commands.get();
+  pi3hat_moteus_data->replies = servo_replies.get();
 
   // lock memory for real-time performance
   if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
@@ -216,7 +221,7 @@ int main(int argc, char** argv) {
   }
 
   // clear stale replies in buses
-  pi3hat_interface->Init(&pi3hat_moteus_data); 
+  pi3hat_interface->Init(pi3hat_moteus_data.get()); 
   
   // initialize servo
   std::cout << "Stopping servos..." << std::endl;
@@ -302,8 +307,8 @@ int main(int argc, char** argv) {
       // Write position commands into the back buffer based on latest feedback
       {
         mjbotscpp::ScopedTimer t(move_monitor, kMoveCmd);
-        const auto& feedback = servo_replies.Read();
-        auto& cmds = servo_commands.BackBuffer();
+        const auto& feedback = servo_replies->Read();
+        auto& cmds = servo_commands->BackBuffer();
         for (const auto& [servo_id, can_bus] : servo_map) {
           auto& cmd = cmds[servo_id];
           cmd.mode = moteus::Mode::kPosition;
@@ -323,14 +328,14 @@ int main(int argc, char** argv) {
             cmd.position.feedforward_torque = 0.0;
           }
         }
-        servo_commands.Publish();
+        servo_commands->Publish();
       }
 
       // Cycle: Commands2CanFdFrames → send → receive
       {
         mjbotscpp::ScopedTimer t(move_monitor, kMoveCycle);
         moteus::BlockingCallback cbk;
-        pi3hat_interface->Cycle(moteus_controller_list, pi3hat_moteus_data, cbk.callback());
+        pi3hat_interface->Cycle(moteus_controller_list, *pi3hat_moteus_data.get(), cbk.callback());
         cbk.Wait();
       }
 
@@ -372,18 +377,18 @@ int main(int argc, char** argv) {
       // Write stop commands into the back buffer
       {
         mjbotscpp::ScopedTimer t(idle_monitor, kIdleCmd);
-        auto& cmds = servo_commands.BackBuffer();
+        auto& cmds = servo_commands->BackBuffer();
         for (const auto& [servo_id, can_bus] : servo_map) {
           cmds[servo_id].mode = moteus::Mode::kStopped;
         }
-        servo_commands.Publish();
+        servo_commands->Publish();
       }
 
       // Cycle: sends stop commands, receives replies
       {
         mjbotscpp::ScopedTimer t(idle_monitor, kIdleCycle);
         moteus::BlockingCallback cbk;
-        pi3hat_interface->Cycle(moteus_controller_list, pi3hat_moteus_data, cbk.callback());
+        pi3hat_interface->Cycle(moteus_controller_list, *pi3hat_moteus_data.get(), cbk.callback());
         cbk.Wait();
       }
 
@@ -415,8 +420,8 @@ int main(int argc, char** argv) {
         std::lock_guard<std::mutex> lock(data_mutex);
         local_elapsed_time = elapsed_time;
       }
-      const auto& local_cmds    = servo_commands.Read();
-      const auto& local_replies = servo_replies.Read();
+      const auto& local_cmds    = servo_commands->Read();
+      const auto& local_replies = servo_replies->Read();
 
       double elapsed_ms = local_elapsed_time.count() / 1e6;
 
